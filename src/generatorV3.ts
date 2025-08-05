@@ -166,7 +166,7 @@ ${controllerClasses.join('\n\n')}
     // 1. 只用 path 生成 methodName
     const pathParts = path.split('/').filter(Boolean);
     const isParam = (part: string) => /^\{.+\}$/.test(part);
-    let methodName = '';
+    let methodName ="";
     let bySuffix = '';
     // 检查最后一个片段是否为参数
     if (pathParts.length > 0 && isParam(pathParts[pathParts.length - 1])) {
@@ -180,15 +180,17 @@ ${controllerClasses.join('\n\n')}
       }
       // 提取参数名
       const paramName = pathParts[pathParts.length - 1].replace(/[{}]/g, '');
-      bySuffix = 'By' + paramName.charAt(0).toUpperCase() + paramName.slice(1);
+      if (!methodName.includes('By')) {
+        bySuffix = 'By' + paramName.charAt(0).toUpperCase() + paramName.slice(1);
+      }
       methodName = base ? base + bySuffix : bySuffix;
       // 唯一性检查
-      if (usedNames.has(methodName)) {
+      if (usedNames.has(`${controllerName}.${methodName}`)) {
         // 继续往前找
         for (let i = pathParts.length - 3; i >= 0; i--) {
           if (!isParam(pathParts[i])) {
             methodName = this.sanitizeName(pathParts[i] + bySuffix);
-            if (!usedNames.has(methodName)) break;
+            if (!usedNames.has(`${controllerName}.${methodName}`)) break;
           }
         }
       }
@@ -197,21 +199,21 @@ ${controllerClasses.join('\n\n')}
       for (let i = pathParts.length - 1; i >= 0; i--) {
         if (!isParam(pathParts[i])) {
           methodName = this.sanitizeName(pathParts[i]);
-          if (!usedNames.has(methodName)) {
+          if (!usedNames.has(`${controllerName}.${methodName}`)) {
             break;
           }
         }
       }
     }
     // 如果 methodName 为空或已全部重复，则用 operationId
-    if (!methodName || usedNames.has(methodName)) {
+    if (!methodName || usedNames.has(`${controllerName}.${methodName}`)) {
       methodName = this.sanitizeName(operation.operationId || this.getOperationId(path, method));
     }
-    usedNames.add(methodName);
+  
+    usedNames.add(`${controllerName}.${methodName}`);
 
     const paramsType = this.getParamsType(operation);
     const returnType = this.getReturnType(operation);
-    console.log('%c [ methodName ]-158', 'font-size:12px; background:#f33945; color:#ff7d89;', methodName)
 
     // 处理路径中的行内参数
     let processedPath = path;
