@@ -12,6 +12,7 @@ export class ApiGenerator {
         this.typeNames.push(this.sanitizeName(name));
       });
     }
+    console.log('%c [ this.typeNames ]-13', 'font-size:12px; background:#6643da; color:#aa87ff;', this.typeNames)
   }
 
   async generate(apiDocs: any, framework: string, outputType: string, outputPath: string): Promise<void> {
@@ -151,9 +152,66 @@ ${controllerClasses.join('\n\n')}
   }
 
   private generateServiceMethod(path: string, method: string, operation: any): string {
+    // 唯一性集合静态存储在 controller 作用域
+    if (!(globalThis as any)._controllerMethodNames) {
+      (globalThis as any)._controllerMethodNames = {};
+    }
+    const tag = operation.tags?.[0] || 'Default';
+    const controllerName = this.sanitizeName(tag);
+    if (!(globalThis as any)._controllerMethodNames[controllerName]) {
+      (globalThis as any)._controllerMethodNames[controllerName] = new Set();
+    }
+    const usedNames: Set<string> = (globalThis as any)._controllerMethodNames[controllerName];
+
+    // 1. 只用 path 生成 methodName
+    const pathParts = path.split('/').filter(Boolean);
+    const isParam = (part: string) => /^\{.+\}$/.test(part);
+    let methodName = '';
+    let bySuffix = '';
+    // 检查最后一个片段是否为参数
+    if (pathParts.length > 0 && isParam(pathParts[pathParts.length - 1])) {
+      // 取前一个非参数片段
+      let base = '';
+      for (let i = pathParts.length - 2; i >= 0; i--) {
+        if (!isParam(pathParts[i])) {
+          base = this.sanitizeName(pathParts[i]);
+          break;
+        }
+      }
+      // 提取参数名
+      const paramName = pathParts[pathParts.length - 1].replace(/[{}]/g, '');
+      bySuffix = 'By' + paramName.charAt(0).toUpperCase() + paramName.slice(1);
+      methodName = base ? base + bySuffix : bySuffix;
+      // 唯一性检查
+      if (usedNames.has(methodName)) {
+        // 继续往前找
+        for (let i = pathParts.length - 3; i >= 0; i--) {
+          if (!isParam(pathParts[i])) {
+            methodName = this.sanitizeName(pathParts[i] + bySuffix);
+            if (!usedNames.has(methodName)) break;
+          }
+        }
+      }
+    } else {
+      // 正常逻辑，最后一个非参数片段
+      for (let i = pathParts.length - 1; i >= 0; i--) {
+        if (!isParam(pathParts[i])) {
+          methodName = this.sanitizeName(pathParts[i]);
+          if (!usedNames.has(methodName)) {
+            break;
+          }
+        }
+      }
+    }
+    // 如果 methodName 为空或已全部重复，则用 operationId
+    if (!methodName || usedNames.has(methodName)) {
+      methodName = this.sanitizeName(operation.operationId || this.getOperationId(path, method));
+    }
+    usedNames.add(methodName);
+
     const paramsType = this.getParamsType(operation);
     const returnType = this.getReturnType(operation);
-    const methodName = this.sanitizeName(operation.operationId || this.getOperationId(path, method));
+    console.log('%c [ methodName ]-158', 'font-size:12px; background:#f33945; color:#ff7d89;', methodName)
 
     // 处理路径中的行内参数
     let processedPath = path;
@@ -384,7 +442,7 @@ ${controllerClasses.join('\n\n')}
           return `"${name}"${isRequired ? '' : '?'}: ${this.getTypeScriptType(prop, apiDocs)}`;
         });
         if (schema.additionalProperties) {
-          properties.push(`[key:string]:${this.getTypeScriptType(schema.additionalProperties, apiDocs)}`)
+          properties.push(`[key: string]: ${this.getTypeScriptType(schema.additionalProperties, apiDocs)}`)
         }
         return `{${properties.join(', ')}}`;
       }
