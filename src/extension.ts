@@ -61,6 +61,14 @@ export function activate(context: vscode.ExtensionContext) {
       const framework = config.get("framework") as string
       const outputType = config.get("outputType") as string
 
+      // 右侧 loading
+      const loadingRight = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Right,
+        100
+      )
+      loadingRight.text = "$(sync~spin) 拉取 API 文档..."
+      loadingRight.show()
+
       try {
         let apiDocs
         if (apiDocsUrl) {
@@ -68,6 +76,7 @@ export function activate(context: vscode.ExtensionContext) {
         } else if (apiDocsPath) {
           apiDocs = await apiParser.parseFromFile(apiDocsPath)
         } else {
+          loadingRight.hide()
           vscode.window.showErrorMessage("请配置API文档URL或路径")
           return
         }
@@ -90,7 +99,12 @@ export function activate(context: vscode.ExtensionContext) {
           )
           vscode.window.showInformationMessage("API文档生成成功！")
         }
+        loadingRight.hide()
+        loadingRight.dispose()
       } catch (error: unknown) {
+        loadingRight.hide()
+        loadingRight.dispose()
+        // 显示更详尽的错误（parser 已经尝试包含 HTTP 详情）
         const errorMessage = error instanceof Error ? error.message : "未知错误"
         vscode.window.showErrorMessage(`生成API文档失败: ${errorMessage}`)
       }
@@ -164,12 +178,12 @@ export function activate(context: vscode.ExtensionContext) {
             const config = vscode.workspace.getConfiguration("generator-ts-api")
             const framework = config.get("framework") as string
             const outputType = config.get("outputType") as string
-            // 添加loading
+            // 添加右侧 loading（拉取/生成）
             const loading = vscode.window.createStatusBarItem(
-              vscode.StatusBarAlignment.Left,
+              vscode.StatusBarAlignment.Right,
               100
             )
-            loading.text = "生成中..."
+            loading.text = "$(sync~spin) 生成中..."
             loading.show()
             await generator.generate(
               apiDocs,
@@ -178,6 +192,7 @@ export function activate(context: vscode.ExtensionContext) {
               outputPath.fsPath
             )
             loading.hide()
+            loading.dispose()
             // 保存成功的 URL 到历史记录
             saveUrlToHistory(selected)
             vscode.window.showInformationMessage("API文档生成成功！")
@@ -217,12 +232,12 @@ export function activate(context: vscode.ExtensionContext) {
             const config = vscode.workspace.getConfiguration("generator-ts-api")
             const framework = config.get("framework") as string
             const outputType = config.get("outputType") as string
-            // 添加loading
+            // 添加右侧 loading（生成）
             const loading = vscode.window.createStatusBarItem(
-              vscode.StatusBarAlignment.Left,
+              vscode.StatusBarAlignment.Right,
               100
             )
-            loading.text = "生成中..."
+            loading.text = "$(sync~spin) 生成中..."
             loading.show()
             await generator.generate(
               apiDocs,
@@ -231,6 +246,7 @@ export function activate(context: vscode.ExtensionContext) {
               outputPath.fsPath
             )
             loading.hide()
+            loading.dispose()
             vscode.window.showInformationMessage("API文档生成成功！")
           }
         } catch (error: unknown) {

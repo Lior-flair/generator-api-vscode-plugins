@@ -5,6 +5,8 @@ import { OpenAPIV3 } from "openapi-types"
 
 export class ApiGenerator {
   private typeNames: string[] = []
+  // 存放泛型基名 -> { genericName, concreteNames }
+  private genericMap: Map<string, { genericName: string; concreteNames: string[] }> = new Map()
 
   private initializeTypeNames(apiDocs: any): void {
     if (apiDocs.components?.schemas) {
@@ -49,13 +51,103 @@ export class ApiGenerator {
 
   private generateCode(apiDocs: any, framework: string, outputType: string): string {
     const types: string[] = []
+    const enums: string[] = []
     const controllers: Map<string, string[]> = new Map()
+    // 用于存放识别到的泛型基名 -> 列表(具体名)
+    const genericCandidates: Map<string, { concreteNames: string[]; representativeSchema: any }> = new Map()
 
     // 生成类型定义 (兼容 OpenAPI3 和 Swagger2)
+    // 第一步：扫描 schema 名称，识别类似 "接口返回对象«X»" 或 "接口返回对象《X》" 的泛型候选项
+    const schemasSource = this.isOpenApi3(apiDocs) ? apiDocs.components?.schemas || {} : apiDocs.definitions || {}
+    for (const [name, schema] of Object.entries(schemasSource)) {
+      // 匹配多种括号样式：《》, «», <>
+      const m = String(name).match(/^(.*?)[«《<]([^»》>]+)[»》>]$/)
+      if (m) {
+        const base = m[1]
+        const inner = m[2]
+        if (!genericCandidates.has(base)) {
+          genericCandidates.set(base, { concreteNames: [], representativeSchema: schema })
+        }
+        genericCandidates.get(base)!.concreteNames.push(String(name))
+      }
+    }
+
+    // 对于检测到的泛型基名，如果出现多种具体实现（>1），我们会生成一个泛型接口并跳过为每个具体名生成重复类型
+    const genericDefinitions: string[] = []
+    const generatedGenericBases = new Set<string>()
+    for (const [base, info] of genericCandidates) {
+      if (info.concreteNames.length > 1) {
+        const genericBaseSan = this.sanitizeName(base)
+        if (!generatedGenericBases.has(genericBaseSan)) {
+          const genericDef = this.generateGenericTypeDefinition(genericBaseSan, info.representativeSchema, info.concreteNames, apiDocs)
+          if (genericDef) {
+            genericDefinitions.push(genericDef)
+            generatedGenericBases.add(genericBaseSan)
+          }
+        }
+      }
+    }
+
+    // 将泛型接口放到 types 里（优先）
+    types.push(...genericDefinitions)
+    // 为每个被泛型覆盖的具体 wrapper 生成 type alias 指向泛型实例，保证引用类型存在且含泛型参数
+    for (const [base, info] of genericCandidates) {
+      const genericBaseSan = this.sanitizeName(base)
+      if (!generatedGenericBases.has(genericBaseSan)) continue
+      for (const rawConcrete of info.concreteNames) {
+        const sanitizedConcrete = this.sanitizeName(rawConcrete)
+        // 找到具体 schema 以解析 inner type
+        let concreteSchema = schemasSource[rawConcrete]
+        if (!concreteSchema) {
+          const alt = this.sanitizeName(rawConcrete)
+          concreteSchema = schemasSource[alt] || schemasSource[String(rawConcrete).replace(/[«»《》<>]/g, "")]
+        }
+        let innerType = "any"
+        if (concreteSchema && concreteSchema.properties) {
+          const data = concreteSchema.properties.data || concreteSchema.properties.result
+          if (data) {
+            if (data.$ref) {
+              const name = data.$ref.split("/").pop()
+              innerType = name ? this.sanitizeName(name) : "any"
+            } else if (data.type === "array" && data.items && data.items.$ref) {
+              const name = data.items.$ref.split("/").pop()
+              innerType = name ? `${this.sanitizeName(name)}[]` : "any[]"
+            } else {
+              innerType = this.getTypeScriptType(data, apiDocs)
+            }
+          }
+        }
+        const alias = `export type ${sanitizedConcrete} = ${genericBaseSan}<${innerType}>;`
+        // 避重：如果已存在相同 alias，跳过
+        if (!types.includes(alias)) types.push(alias)
+      }
+    }
+    // 收集在 generateTypeDefinition 中产生的 property-level enums
+    const generatedEnums: string[] = []
+    if ((this as any).__generatedEnums instanceof Map) {
+      for (const enumDef of (this as any).__generatedEnums.values()) generatedEnums.push(enumDef)
+    }
+    // 将 enums 放在 types 之前
+    if (generatedEnums.length > 0) {
+      types.unshift(...generatedEnums)
+    }
+
+    // 然后正常生成其他类型，跳过被泛型覆盖的具体 wrapper 名称
+    const skipNames = new Set<string>()
+    for (const info of genericCandidates.values()) {
+      if (info.concreteNames.length > 1) info.concreteNames.forEach((n) => skipNames.add(String(n)))
+    }
+
     if (this.isOpenApi3(apiDocs)) {
       if (apiDocs.components && apiDocs.components.schemas) {
         for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
+          if (skipNames.has(String(name))) continue
           if (this.isSchemaObject(schema) && (schema as any).type === "object") {
+            // top-level enum as schema
+            if ((schema as any).enum) {
+              const enumName = this.sanitizeName(name) + "Enum"
+              enums.push(this.generateEnumDefinition(enumName, (schema as any).enum))
+            }
             const typeDef = this.generateTypeDefinition(this.sanitizeName(name), schema, apiDocs)
             types.push(typeDef)
           }
@@ -64,7 +156,12 @@ export class ApiGenerator {
     } else {
       if (apiDocs.definitions) {
         for (const [name, schema] of Object.entries(apiDocs.definitions)) {
+          if (skipNames.has(String(name))) continue
           if (this.isSchemaObject(schema) && (schema as any).type === "object") {
+            if ((schema as any).enum) {
+              const enumName = this.sanitizeName(name) + "Enum"
+              enums.push(this.generateEnumDefinition(enumName, (schema as any).enum))
+            }
             const typeDef = this.generateTypeDefinition(this.sanitizeName(name), schema, apiDocs)
             types.push(typeDef)
           }
@@ -141,7 +238,17 @@ ${controllerClasses.join("\n\n")}
       console.log('%c [ propSchema ]-141', 'font-size:12px; background:#a58eed; color:#e9d2ff;', propSchema)
       const sanitizedPropName = this.sanitizeName(propName)
       const isRequired = required.includes(propName)
-      const type = this.getTypeScriptType(propSchema, apiDocs)
+      // 如果 propSchema 包含 enum，先生成 enum 定义并使用枚举名
+      let type = this.getTypeScriptType(propSchema, apiDocs)
+      if (propSchema && (propSchema as any).enum) {
+        const enumName = `${name}_${this.sanitizeName(propName)}_Enum`
+        // 生成枚举并 prepend 到 types（由调用者统一合并），这里直接把枚举定义放在类型注释中以便后续收集
+        const enumDef = this.generateEnumDefinition(enumName, (propSchema as any).enum)
+        type = enumName
+        // 将枚举放在 types 头部（简单策略：直接插入 types via push to a global array is complex here). We'll attach enum definitions to schema by side-effect map
+        ;(this as any).__generatedEnums = (this as any).__generatedEnums || new Map<string, string>()
+        ;(this as any).__generatedEnums.set(enumName, enumDef)
+      }
       const desc =
         propSchema && typeof propSchema === "object" && ("description" in propSchema || "title" in propSchema)
           ? (propSchema as { description?: string; title?: string }).description || (propSchema as { title?: string }).title || ""
@@ -150,6 +257,103 @@ ${controllerClasses.join("\n\n")}
     })
 
     return `export interface ${name} {\n${propertyDefs.join("\n")}\n}`
+  }
+
+  private generateEnumDefinition(name: string, values: any[]): string {
+    // 如果值都是字符串或数字，生成 union 或 enum
+    const allStrings = values.every((v) => typeof v === "string")
+    const allNumbers = values.every((v) => typeof v === "number")
+    if (allStrings || allNumbers) {
+      // 使用 TypeScript union of literals（更灵活，避免 runtime enum）
+      const literal = values.map((v) => (typeof v === "string" ? `'${v}'` : String(v))).join(" | ")
+      return `export type ${name} = ${literal};`
+    }
+    // Fallback
+    return `export type ${name} = any;`
+  }
+
+  private generateGenericTypeDefinition(baseName: string, representativeSchema: any, concreteNames: string[], apiDocs: any): string {
+    const genericName = this.sanitizeName(baseName)
+    // 记录映射，方便 getTypeScriptType 使用
+    this.genericMap.set(genericName, { genericName, concreteNames: concreteNames.map((n) => this.sanitizeName(n)) })
+
+    // 从 apiDocs 中获取所有具体 schema
+    const schemasSource = this.isOpenApi3(apiDocs) ? apiDocs.components?.schemas || {} : apiDocs.definitions || {}
+
+    const propMaps: Array<Record<string, any>> = []
+    const presentNames: string[] = []
+    for (const rawName of concreteNames) {
+      // rawName 可能包含特殊字符，尝试多种键
+      let schema = schemasSource[rawName]
+      if (!schema) {
+        const alt = this.sanitizeName(rawName)
+        schema = schemasSource[alt] || schemasSource[String(rawName).replace(/[«»《》<>]/g, "")]
+      }
+      if (schema && typeof schema === "object") {
+        propMaps.push(schema.properties || {})
+        presentNames.push(String(rawName))
+      }
+    }
+
+    // 计算交集字段
+    let intersection = new Set<string>()
+    if (propMaps.length > 0) {
+      intersection = new Set(Object.keys(propMaps[0]))
+      for (let i = 1; i < propMaps.length; i++) {
+        intersection = new Set(Array.from(intersection).filter((k) => k in propMaps[i]))
+      }
+    }
+
+    // 生成字段定义：对 intersection 内的字段推断类型；data/result 使用泛型T
+    const fieldLines: string[] = []
+    for (const key of Array.from(intersection)) {
+      // 收集每个 concrete 对应字段的类型字符串
+      const typesSet = new Set<string>()
+      for (let i = 0; i < propMaps.length; i++) {
+        const propSchema = propMaps[i][key]
+        if (!propSchema) continue
+        if (key === "data" || key === "result") {
+          // 作为泛型占位
+          // 若 data 是数组且 items 有 $ref，则为 T[]
+          if (propSchema.type === "array") {
+            typesSet.add("T[]")
+          } else {
+            typesSet.add("T")
+          }
+        } else {
+          const t = this.getTypeScriptType(propSchema, apiDocs)
+          typesSet.add(t)
+        }
+      }
+      const typesArr = Array.from(typesSet)
+      const typeStr = typesArr.length === 1 ? typesArr[0] : typesArr.join(" | ")
+      fieldLines.push(`  ${this.sanitizeName(key)}?: ${typeStr};`)
+    }
+
+    // 对非交集字段做注释，指出每个具体类型的额外字段，便于审查
+    const unionKeys = new Set<string>()
+    for (const pm of propMaps) Object.keys(pm).forEach((k) => unionKeys.add(k))
+    const extraKeys = Array.from(unionKeys).filter((k) => !intersection.has(k))
+    const comments: string[] = []
+    if (extraKeys.length > 0) {
+      comments.push("// 以下字段在部分具体实现中存在：")
+      for (const name of presentNames) {
+        const schema = schemasSource[name] || schemasSource[this.sanitizeName(name)]
+        if (!schema) continue
+        const keys = Object.keys(schema.properties || {}).filter((k) => !intersection.has(k))
+        if (keys.length > 0) {
+          comments.push(`// ${name}: ${keys.join(", ")}`)
+        }
+      }
+    }
+
+    // 生成最终泛型接口文本
+    const bodyLines = [...comments, ...fieldLines]
+    // 为了兼容未列出的字段，保留索引签名
+    bodyLines.push(`  [key: string]: any;`)
+
+    const def = `export interface ${genericName}<T> {\n${bodyLines.join("\n")}\n}`
+    return def
   }
 
   private generateServiceMethod(path: string, method: string, operation: any, apiDocs: any): string {
@@ -340,7 +544,7 @@ ${controllerClasses.join("\n\n")}
   }
 
   private getParamsType(operation: any, apiDocs: any): string {
-    const params: string[] = []
+    const paramsMap: Map<string, string> = new Map()
 
     if (operation.parameters) {
       operation.parameters.forEach((param: any) => {
@@ -349,7 +553,7 @@ ${controllerClasses.join("\n\n")}
           const isRequired = param.required === true
           const schema = param.schema || param
           const type = this.getTypeScriptType(schema, apiDocs)
-          // collectionFormat on swagger2
+          let paramDecl = `"${paramName}"${isRequired ? "" : "?"}: ${type}`
           if (param.collectionFormat) {
             switch (param.collectionFormat) {
               case "csv":
@@ -357,14 +561,14 @@ ${controllerClasses.join("\n\n")}
               case "tsv":
               case "pipes":
               case "multi":
-                params.push(`"${paramName}"${isRequired ? "" : "?"}: string[]`)
+                paramDecl = `"${paramName}"${isRequired ? "" : "?"}: string[]`
                 break
               default:
-                params.push(`"${paramName}"${isRequired ? "" : "?"}: ${type}`)
+                break
             }
-          } else {
-            params.push(`"${paramName}"${isRequired ? "" : "?"}: ${type}`)
           }
+          // 去重：以最后出现为准（覆盖此前相同 name 的声明）
+          paramsMap.set(paramName, paramDecl)
         }
       })
     }
@@ -375,22 +579,23 @@ ${controllerClasses.join("\n\n")}
       if (content["application/json"]) {
         const schema = content["application/json"].schema
         if (schema) {
-          params.push(`body: ${this.getTypeScriptType(schema, apiDocs)}`)
+          paramsMap.set("body", `body: ${this.getTypeScriptType(schema, apiDocs)}`)
         }
       } else if (content["multipart/form-data"] || content["application/x-www-form-urlencoded"]) {
         const key = content["multipart/form-data"] ? "multipart/form-data" : "application/x-www-form-urlencoded"
         const schema = content[key].schema
         if (schema) {
-          params.push(`formData: ${this.getTypeScriptType(schema, apiDocs)}`)
+          paramsMap.set("formData", `formData: ${this.getTypeScriptType(schema, apiDocs)}`)
         }
       }
     } else if (operation.parameters) {
       const bodyParam = operation.parameters.find((p: any) => p.in === "body")
       if (bodyParam && bodyParam.schema) {
-        params.push(`body: ${this.getTypeScriptType(bodyParam.schema, apiDocs)}`)
+        paramsMap.set("body", `body: ${this.getTypeScriptType(bodyParam.schema, apiDocs)}`)
       }
     }
 
+    const params = Array.from(paramsMap.values())
     return `params: {${params.join(", ")}} = {} as any, options: RequestConfig = {} `
   }
 
@@ -462,6 +667,23 @@ ${controllerClasses.join("\n\n")}
       const typeName = refPath.split("/").pop()
       if (typeName) {
         const sanitized = this.sanitizeName(typeName)
+        // 如果该类型属于 genericMap 的 concrete 名称之一，返回泛型形式
+        for (const [genericBase, info] of this.genericMap) {
+          if (info.concreteNames.includes(sanitized)) {
+            // 提取 inner type 名称（尝试从具体 schema 的 properties 中找）
+            // 这里简单使用 any 或查找 schema 中的 data 字段的类型
+            const refType = this.resolveRef(refPath, apiDocs)
+            let innerType = "any"
+            if (refType && refType.properties) {
+              if (refType.properties.data && refType.properties.data.$ref) {
+                const innerRef = refType.properties.data.$ref
+                const name = innerRef.split("/").pop()
+                innerType = name ? this.sanitizeName(name) : "any"
+              }
+            }
+            return `${genericBase}<${innerType}>`
+          }
+        }
         if (this.typeNames.includes(sanitized)) return sanitized
       }
       const refType = this.resolveRef(refPath, apiDocs)
@@ -475,6 +697,23 @@ ${controllerClasses.join("\n\n")}
     if (schema.type === "object") {
       if (schema.title) {
         const sanitized = this.sanitizeName(schema.title)
+        // 如果是被泛型合并的具体 wrapper，返回泛型使用
+        for (const [genericBase, info] of this.genericMap) {
+          if (info.concreteNames.includes(sanitized)) {
+            // 找到 inner 类型
+            let innerType = "any"
+            if (schema.properties && schema.properties.data) {
+              const data = schema.properties.data
+              if (data.$ref) {
+                const name = data.$ref.split("/").pop()
+                innerType = name ? this.sanitizeName(name) : "any"
+              } else {
+                innerType = this.getTypeScriptType(data, apiDocs)
+              }
+            }
+            return `${genericBase}<${innerType}>`
+          }
+        }
         if (this.typeNames.includes(sanitized)) return sanitized
       }
       if (schema.properties) {
