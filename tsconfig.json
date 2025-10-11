@@ -11,7 +11,8 @@
 		"strict": true,   /* enable all strict type-checking options */
 		"moduleResolution": "node",
 		"esModuleInterop": true,
-		"skipLibCheck": true
+		"skipLibCheck": true,
+		"ignoreDeprecations": "6.0"
 	},
 	"exclude": ["node_modules", ".vscode-test"]
 }

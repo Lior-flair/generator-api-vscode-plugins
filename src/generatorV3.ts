@@ -12,11 +12,6 @@ export class ApiGenerator {
         this.typeNames.push(this.sanitizeName(name))
       })
     }
-    console.log(
-      "%c [ this.typeNames ]-13",
-      "font-size:12px; background:#6643da; color:#aa87ff;",
-      this.typeNames
-    )
   }
 
   async generate(

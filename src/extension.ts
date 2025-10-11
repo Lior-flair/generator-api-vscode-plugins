@@ -38,12 +38,6 @@ export function activate(context: vscode.ExtensionContext) {
     context.globalState.update("urlHistory", urlHistory)
   }
 
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
-  console.log(
-    'Congratulations, your extension "generator-ts-api" is now active!'
-  )
-
   // 获取对应的生成器
   const getGenerator = (apiDocs: any) => {
     if (apiDocs.openapi && apiDocs.openapi.startsWith("3.")) {
