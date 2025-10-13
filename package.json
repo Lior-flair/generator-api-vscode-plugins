@@ -2,6 +2,7 @@
   "name": "generator-ts-api",
   "displayName": "generator-ts-api",
   "description": "从后端API文档生成前端TypeScript/JavaScript代码",
+  "icon": "1759111754.png",
   "version": "0.0.11",
   "engines": {
     "vscode": "^1.60.0"
