@@ -292,17 +292,17 @@ export class ApiGenerator {
 
         // decide whether to generate a separate Params interface
         const uniqueFieldCount = paramsProps.length
-        let paramsTypeUsage = "params: { } = {} as any, options: any = {}"
+        let paramsTypeUsage = "params: { } = {} as any, options: RequestConfig = {}"
         if (uniqueFieldCount > 5) {
           // create params interface
           paramTypes.push(`export interface ${paramsName} {\n${paramsProps.join("\n")}\n}`)
-          paramsTypeUsage = `params: ${paramsName} = {} as any, options: any = {}`
+          paramsTypeUsage = `params: ${paramsName} = {} as any, options: RequestConfig = {}`
         } else if (uniqueFieldCount === 0) {
-          paramsTypeUsage = "params: { } = {} as any, options: any = {}"
+          paramsTypeUsage = "params: { } = {} as any, options: RequestConfig = {}"
         } else {
           // inline the params type
           const inlineType = paramsProps.length > 0 ? `{\n ${paramsProps.map((p) => p.replace(/^\s+/, "")).join(",\n")}  \n}` : "{ }"
-          paramsTypeUsage = `params: ${inlineType} = {} as any, options: any = {}`
+          paramsTypeUsage = `params: ${inlineType} = {} as any, options: RequestConfig = {}`
         }
 
         // determine return type
@@ -374,7 +374,7 @@ export class ApiGenerator {
           method +
           "', '" +
           requestContentType +
-          "', url, options);\n      configs.params = params as any;\n      request(configs, resolve, reject);\n    });\n  }"
+          "', url, options);\n      configs.params = params;\n      request(configs, resolve, reject);\n    });\n  }"
 
         controllers.get(controllerName)?.push(methodCode)
       }
