@@ -281,7 +281,7 @@ export class ApiGenerator {
             const pname = param.name
             if (!seenFields.has(pname)) {
               const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
-              paramsProps.push(`/** ${param?.description ? param?.description: ''} */\n  "${pname}"${param.required ? "" : "?"}: ${t}`)
+              paramsProps.push(`/** ${param?.description ? param?.description : ""} */\n  "${pname}"${param.required ? "" : "?"}: ${t}`)
               seenFields.add(pname)
             }
           }
@@ -304,6 +304,81 @@ export class ApiGenerator {
           const inlineType = paramsProps.length > 0 ? `{\n ${paramsProps.map((p) => p.replace(/^\s+/, "")).join(",\n")}  \n}` : "{ }"
           paramsTypeUsage = `params: ${inlineType} = {} as any, options: RequestConfig = {}`
         }
+
+        /** =-===========================start 处理params */
+        // 在 method 循环内，parameters 遍历前添加：
+        const queryParams: string[] = []
+        const headerParams: string[] = []
+        let hasBody = false
+        let hasFormData = false
+        const formDataFields: { name: string }[] = []
+
+        for (const param of parameters) {
+          if ((param as any).$ref) continue
+          const inType = param.in
+          const pname = param.name
+
+          if (inType === "body") {
+            const schema = param.schema as OpenAPIV2.SchemaObject
+            const t = this.getTypByProperties(schema)
+            if (!seenFields.has("body")) {
+              paramsProps.push(`  body${param.required ? "" : "?"}: ${t}`)
+              seenFields.add("body")
+            }
+            hasBody = true
+          } else if (inType === "formData") {
+            const schemaType = (param as any).type ? this.getTypByProperties(param as any) : "any"
+            const key = "formData" + (param.name ? `_${param.name}` : "")
+            if (!seenFields.has(key)) {
+              paramsProps.push(`  formData${param.required ? "" : "?"}: { ${param.name}: ${schemaType} }`)
+              seenFields.add(key)
+            }
+            hasFormData = true
+            formDataFields.push({ name: pname })
+          } else {
+            const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
+            paramsProps.push(`/** ${param?.description || ""} */\n  "${pname}"${param.required ? "" : "?"}: ${t}`)
+            seenFields.add(pname)
+
+            // 👇 新增：记录运行时分类
+            if (inType === "query" || inType === "path") {
+              queryParams.push(pname)
+            } else if (inType === "header") {
+              headerParams.push(pname)
+            }
+            // path 忽略
+          }
+        }
+
+        let optionsAssignment = ""
+
+        if (queryParams.length > 0 || headerParams.length > 0 || hasBody || hasFormData) {
+          const parts: string[] = []
+
+          // query → options.params
+          if (queryParams.length > 0) {
+            parts.push(`params: params`)
+          }
+
+          // headers → options.headers
+          // if (headerParams.length > 0) {
+          //   const h = headerParams.map((n) => `"${n}": params.${n}`).join(",\n      ")
+          //   parts.push(`headers: {\n      ${h}\n    }`)
+          // }
+
+          // body or formData → options.data
+          if (hasBody) {
+            parts.push(`data: params`)
+          } else if (hasFormData) {
+            parts.push(`data: params`)
+          }
+
+          optionsAssignment = `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
+        } else {
+          optionsAssignment = "const finalOptions = options;"
+        }
+
+        /** =-===========================end 处理params */
 
         // determine return type
         let returnType = "any"
@@ -354,27 +429,23 @@ export class ApiGenerator {
         })
 
         // request content type (formData/body)
-        const requestContentType = (op.parameters || []).some((p: any) => p.in === "formData") ? "multipart/form-data" : "application/json"
+        const requestContentType = (op.parameters || []).some((p: any) => p.in === "formData") ? "" : "application/json"
+        // const requestContentType = (op.parameters || []).some((p: any) => p.in === "formData") ? "multipart/form-data" : "application/json"
 
-        const methodCode =
-          "  /**\n   * " +
-          (op.summary || "") +
-          (op.description && op.summary !== op.description ? "\n   * " + op.description : "") +
-          (op.deprecated ? "\n   * @deprecated true" : "") +
-          (op.example ? "\n   * @example " + op.example || op?.["x-example"] : "") +
-          "\n   */\n  static " +
-          methodName +
-          "(" +
-          paramsTypeUsage +
-          "): Promise<" +
-          returnType +
-          "> {\n    return new Promise((resolve, reject) => {\n      const url = `" +
-          processedPath +
-          "`;\n      const configs = getConfigs('" +
-          method +
-          "', '" +
-          requestContentType +
-          "', url, options);\n      configs.params = params;\n      request(configs, resolve, reject);\n    });\n  }"
+        const methodCode = `  /**\n* ${op.summary || ""}${op.description && op.description !== op.summary ? "\n* " + op.description : ""}${op.deprecated ? "\n* @deprecated true" : ""}${op.example ? "\n* @example" + op.example : ""}\n*/
+  static ${methodName}(${paramsTypeUsage}): Promise<${returnType}> {
+    return new Promise((resolve, reject) => {
+      const url = \`${processedPath}\`;
+      ${optionsAssignment}
+      const configs = getConfigs(
+        '${method}',
+        '${requestContentType}',
+        url,
+        finalOptions
+      );
+      request(configs, resolve, reject);
+    });
+  }`
 
         controllers.get(controllerName)?.push(methodCode)
       }

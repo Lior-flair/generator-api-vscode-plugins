@@ -220,11 +220,6 @@ ${controllerClasses.join("\n\n")}
         partStartIndex--
         // 提取参数名
         const paramName = part.replace(/[{}]/g, "")
-        console.log(
-          "%c [ paramName ]-228",
-          "font-size:12px; background:#b20392; color:#f647d6;",
-          paramName
-        )
         if (!bySuffix) {
           if (!methodName.includes("By")) {
             bySuffix =
@@ -233,11 +228,6 @@ ${controllerClasses.join("\n\n")}
             bySuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1)
           }
         }
-        console.log(
-          "%c [ bySuffix ]-234",
-          "font-size:12px; background:#8da045; color:#d1e489;",
-          bySuffix
-        )
       } else {
         partsIndex.unshift(partStartIndex)
         let n_methodName = partsIndex
@@ -263,17 +253,7 @@ ${controllerClasses.join("\n\n")}
       })
       .join("")
     methodName = methodName + bySuffix
-    console.log(
-      "%c [ bySuffix ]-261",
-      "font-size:12px; background:#3961be; color:#7da5ff;",
-      bySuffix
-    )
 
-    console.log(
-      "%c [ `${controllerName}.${methodName}` ]-278",
-      "font-size:12px; background:#984309; color:#dc874d;",
-      `${controllerName}.${methodName}`
-    )
     // 如果 methodName 为空或已全部重复，则用 operationId
     if (!methodName || usedNames.has(`${controllerName}.${methodName}`)) {
       methodName = this.sanitizeName(
@@ -358,7 +338,7 @@ ${controllerClasses.join("\n\n")}
    * ${operation.summary || ""}${
       operation.description ? "\n  * " + operation.description : ""
     }${operation.deprecated ? "\n  * @deprecated true" : ""}${
-      operation.callbacks ? "\n * @returns " : ""
+      operation.callbacks ? "\n * @returns "+operation.callbacks : ""
     }
    */
   static ${methodName}(${paramsType}): Promise<${returnType}> {
