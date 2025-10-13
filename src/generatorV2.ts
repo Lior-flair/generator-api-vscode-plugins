@@ -480,15 +480,16 @@ export class ApiGenerator {
         }
       }
     }
-
+    const typeNames:string [] = []
     for (const [name, schema] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
       if (matchName.length === 0) {
         if (!this.genericTypes.includes(name) === true) {
-          this.typeNames.push(name)
+          typeNames.push(name)
         }
       }
     }
+    this.typeNames = Array.from(new Set(typeNames))
     const genericTypesStr = this.generateGenericTypes(apiDocs)
     // generate non-generic interface types
     const types = this.generateInterfaceType(apiDocs)
