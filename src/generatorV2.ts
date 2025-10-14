@@ -375,7 +375,7 @@ export class ApiGenerator {
 
           optionsAssignment = `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
         } else {
-          optionsAssignment = "const finalOptions = options;"
+          optionsAssignment = "const finalOptions = {...options, params: params};"
         }
 
         /** =-===========================end 处理params */
