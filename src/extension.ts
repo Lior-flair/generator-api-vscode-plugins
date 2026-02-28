@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
       const namingConfig = {
         typesDirName: (config.get("naming.typesDirName") as string) || "types",
         controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-        controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+        controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
         controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
       }
 
@@ -204,7 +204,7 @@ export function activate(context: vscode.ExtensionContext) {
           const namingConfig = {
             typesDirName: (config.get("naming.typesDirName") as string) || "types",
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
           }
 
@@ -294,7 +294,7 @@ export function activate(context: vscode.ExtensionContext) {
           const namingConfig = {
             typesDirName: (config.get("naming.typesDirName") as string) || "types",
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
           }
 

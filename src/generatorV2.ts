@@ -7,14 +7,14 @@ import { SchemaObject } from "openapi-typescript"
 interface NamingConfig {
   typesDirName: string
   controllersDirName: string
-  controllerFileNameCasing: "PascalCase" | "camelCase" | "kebab-case"
+  controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   controllerClassNameSuffix: string
 }
 
 const DEFAULT_NAMING: NamingConfig = {
   typesDirName: "types",
   controllersDirName: "controllers",
-  controllerFileNameCasing: "PascalCase",
+  controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
 }
 
@@ -32,6 +32,7 @@ function toKebabCase(s: string): string {
     .replace(/([A-Z])/g, (m, c: string, offset: number) => (offset === 0 ? c.toLowerCase() : "-" + c.toLowerCase()))
 }
 function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
+  if (casing === "default") return s        // 保持 sanitizeName 结果原样，与旧版一致
   if (casing === "kebab-case") return toKebabCase(s)
   if (casing === "camelCase") return toCamelCase(s)
   return toPascalCase(s)

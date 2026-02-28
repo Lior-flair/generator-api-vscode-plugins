@@ -8,8 +8,8 @@ interface NamingConfig {
   typesDirName: string
   /** Controller 文件夹名，默认 controllers */
   controllersDirName: string
-  /** Controller 文件名命名风格: PascalCase | camelCase | kebab-case */
-  controllerFileNameCasing: "PascalCase" | "camelCase" | "kebab-case"
+  /** Controller 文件名命名风格: default | PascalCase | camelCase | kebab-case */
+  controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   /** Controller 类名及文件名后缀，默认空 */
   controllerClassNameSuffix: string
 }
@@ -17,7 +17,7 @@ interface NamingConfig {
 const DEFAULT_NAMING: NamingConfig = {
   typesDirName: "types",
   controllersDirName: "controllers",
-  controllerFileNameCasing: "PascalCase",
+  controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
 }
 
@@ -40,9 +40,10 @@ function toKebabCase(s: string): string {
 }
 /** 根据配置转换文件名风格 */
 function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
+  if (casing === "default") return s        // 保持 sanitizeName 结果原样，与旧版一致
   if (casing === "kebab-case") return toKebabCase(s)
   if (casing === "camelCase") return toCamelCase(s)
-  return toPascalCase(s) // PascalCase 默认
+  return toPascalCase(s)
 }
 
 export class ApiGenerator {

@@ -89,12 +89,14 @@
         "generator-ts-api.naming.controllerFileNameCasing": {
           "type": "string",
           "enum": [
+            "default",
             "PascalCase",
             "camelCase",
             "kebab-case"
           ],
-          "default": "PascalCase",
+          "default": "default",
           "enumDescriptions": [
+            "保持 Tag 原始名称（仅进行特殊字符过滤），与旧版行为一致",
             "大驼峰，如 UserController.ts",
             "小驼峰，如 userController.ts",
             "连字符，如 user-controller.ts"
