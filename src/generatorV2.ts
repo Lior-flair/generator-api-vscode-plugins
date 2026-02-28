@@ -2,6 +2,40 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV2 } from "openapi-types"
 import { SchemaObject } from "openapi-typescript"
+
+/** byTag 模式命名配置 */
+interface NamingConfig {
+  typesDirName: string
+  controllersDirName: string
+  controllerFileNameCasing: "PascalCase" | "camelCase" | "kebab-case"
+  controllerClassNameSuffix: string
+}
+
+const DEFAULT_NAMING: NamingConfig = {
+  typesDirName: "types",
+  controllersDirName: "controllers",
+  controllerFileNameCasing: "PascalCase",
+  controllerClassNameSuffix: "",
+}
+
+function toPascalCase(s: string): string {
+  return s
+    .replace(/[-_]+(.)/g, (_, c: string) => c.toUpperCase())
+    .replace(/^(.)/, (_, c: string) => c.toUpperCase())
+}
+function toCamelCase(s: string): string {
+  const p = toPascalCase(s)
+  return p.charAt(0).toLowerCase() + p.slice(1)
+}
+function toKebabCase(s: string): string {
+  return toPascalCase(s)
+    .replace(/([A-Z])/g, (m, c: string, offset: number) => (offset === 0 ? c.toLowerCase() : "-" + c.toLowerCase()))
+}
+function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
+  if (casing === "kebab-case") return toKebabCase(s)
+  if (casing === "camelCase") return toCamelCase(s)
+  return toPascalCase(s)
+}
 export class ApiGenerator {
   /**
    * 泛型类型
@@ -34,7 +68,7 @@ export class ApiGenerator {
     // }
   }
 
-  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single"): Promise<void> {
+  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING): Promise<void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
@@ -44,7 +78,7 @@ export class ApiGenerator {
 
       if (outputSplit === "byTag") {
         // 按 Tag 拆分多文件输出
-        this.generateByTag(apiDocs, framework, outputType, outputPath)
+        this.generateByTag(apiDocs, framework, outputType, outputPath, namingConfig)
       } else {
         const code = this.generateCode(apiDocs)
 
@@ -67,7 +101,7 @@ export class ApiGenerator {
    *  - {Tag}.{ext}   每个 Tag 对应的 Controller 类
    *  - index.{ext}   统一 re-export
    */
-  private generateByTag(apiDocs: any, framework: string, outputType: string, outputDir: string): void {
+  private generateByTag(apiDocs: any, framework: string, outputType: string, outputDir: string, naming: NamingConfig = DEFAULT_NAMING): void {
     const ext = outputType === "js" ? "js" : "ts"
 
     // 重置状态，与 generateCode 的配置一致
@@ -102,13 +136,13 @@ export class ApiGenerator {
     const { controllers, paramTypes } = this.generateController(apiDocs)
 
     // ── 子目录路径 ─────────────────────────────────────────────────
-    const typesDir = path.join(outputDir, "types")
-    const controllersDir = path.join(outputDir, "controllers")
+    const typesDir = path.join(outputDir, naming.typesDirName)
+    const controllersDir = path.join(outputDir, naming.controllersDirName)
     ;[typesDir, controllersDir].forEach((d) => {
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     })
 
-    // ── 1. 写入 types/index.{ext} ──────────────────────────────────
+    // ── 1. 写入 {typesDirName}/index.{ext} ────────────────────────
     const typesCode =
       `// 生成时间: ${new Date().toISOString()}\n\n` +
       `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
@@ -117,25 +151,36 @@ export class ApiGenerator {
       paramTypes.join("\n\n") + "\n"
     fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
 
-    // ── 2. 写入各 controllers/{Tag}.{ext} ─────────────────────────
-    const controllerNames: string[] = []
-    for (const [controllerName, methods] of controllers) {
-      const description = (apiDocs.tags || []).find((t: any) => t.name === controllerName)?.description || ""
+    // ── 2. 写入各 {controllersDirName}/{fileName}.{ext} ───────────
+    const fileNames: string[] = []
+    for (const [controllerKey, methods] of controllers) {
+      // 类名：PascalCase + suffix（代码内永远是合法标识符）
+      const pascalBase = toPascalCase(controllerKey)
+      const className = pascalBase + naming.controllerClassNameSuffix
+      // 文件名：应用用户配置的风格 + suffix
+      const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
+      const fileName = fileBase + (naming.controllerClassNameSuffix
+        ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
+        : "")
+
+      const description = (apiDocs.tags || []).find((t: any) =>
+        t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
+      )?.description || ""
       const controllerCode =
         `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
         `const { fetch:request} = requestClass\n\n` +
         `/**\n * ${description}\n */\n` +
-        `export class ${controllerName} {\n${methods.join("\n\n")}\n}\n`
-      fs.writeFileSync(path.join(controllersDir, `${controllerName}.${ext}`), controllerCode, "utf-8")
-      controllerNames.push(controllerName)
+        `export class ${className} {\n${methods.join("\n\n")}\n}\n`
+      fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
+      fileNames.push(fileName)
     }
 
     // controllers/index.{ext}
-    const controllersIndexCode = controllerNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
+    const controllersIndexCode = fileNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
     fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
 
     // ── 3. 根 index.{ext} ──────────────────────────────────────────
-    const rootIndexCode = `export * from "./types"\nexport * from "./controllers"\n`
+    const rootIndexCode = `export * from "./${naming.typesDirName}"\nexport * from "./${naming.controllersDirName}"\n`
     fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 

@@ -2,6 +2,49 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV3 } from "openapi-types"
 
+/** byTag 模式命名配置 */
+interface NamingConfig {
+  /** 类型定义文件夹名，默认 types */
+  typesDirName: string
+  /** Controller 文件夹名，默认 controllers */
+  controllersDirName: string
+  /** Controller 文件名命名风格: PascalCase | camelCase | kebab-case */
+  controllerFileNameCasing: "PascalCase" | "camelCase" | "kebab-case"
+  /** Controller 类名及文件名后缀，默认空 */
+  controllerClassNameSuffix: string
+}
+
+const DEFAULT_NAMING: NamingConfig = {
+  typesDirName: "types",
+  controllersDirName: "controllers",
+  controllerFileNameCasing: "PascalCase",
+  controllerClassNameSuffix: "",
+}
+
+// ── case 转换工具 ───────────────────────────────────────────────
+/** 将任意字符串转为 PascalCase（类名总是大驼峰） */
+function toPascalCase(s: string): string {
+  return s
+    .replace(/[-_]+(.)/g, (_, c: string) => c.toUpperCase())
+    .replace(/^(.)/, (_, c: string) => c.toUpperCase())
+}
+/** 将 PascalCase / 任意字符串转为 camelCase */
+function toCamelCase(s: string): string {
+  const p = toPascalCase(s)
+  return p.charAt(0).toLowerCase() + p.slice(1)
+}
+/** 将 PascalCase / 任意字符串转为 kebab-case */
+function toKebabCase(s: string): string {
+  return toPascalCase(s)
+    .replace(/([A-Z])/g, (m, c: string, offset: number) => (offset === 0 ? c.toLowerCase() : "-" + c.toLowerCase()))
+}
+/** 根据配置转换文件名风格 */
+function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
+  if (casing === "kebab-case") return toKebabCase(s)
+  if (casing === "camelCase") return toCamelCase(s)
+  return toPascalCase(s) // PascalCase 默认
+}
+
 export class ApiGenerator {
   private typeNames: string[] = []
 
@@ -19,7 +62,8 @@ export class ApiGenerator {
     framework: string,
     outputType: string,
     outputPath: string,
-    outputSplit: string = "single"
+    outputSplit: string = "single",
+    namingConfig: NamingConfig = DEFAULT_NAMING
   ): Promise<void> {
     try {
       // 验证API文档
@@ -32,7 +76,7 @@ export class ApiGenerator {
 
       if (outputSplit === "byTag") {
         // 按 Tag 拆分多文件输出
-        this.generateByTag(apiDocs, framework, outputType, outputPath)
+        this.generateByTag(apiDocs, framework, outputType, outputPath, namingConfig)
       } else {
         // 生成代码（单文件）
         const code = this.generateCode(apiDocs, framework, outputType)
@@ -62,18 +106,19 @@ export class ApiGenerator {
     apiDocs: any,
     framework: string,
     outputType: string,
-    outputDir: string
+    outputDir: string,
+    naming: NamingConfig = DEFAULT_NAMING
   ): void {
     const ext = outputType === "js" ? "js" : "ts"
 
     // ── 子目录路径 ────────────────────────────────────────────────
-    const typesDir = path.join(outputDir, "types")
-    const controllersDir = path.join(outputDir, "controllers")
+    const typesDir = path.join(outputDir, naming.typesDirName)
+    const controllersDir = path.join(outputDir, naming.controllersDirName)
     ;[outputDir, typesDir, controllersDir].forEach((d) => {
       if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
     })
 
-    // ── 1. 收集类型定义 → types/index.{ext} ──────────────────────
+    // ── 1. 收集类型定义 → {typesDirName}/index.{ext} ──────────────
     const types: string[] = []
     if (this.isOpenApi3(apiDocs)) {
       if (apiDocs.components?.schemas) {
@@ -103,36 +148,47 @@ export class ApiGenerator {
           if (operation && typeof operation === "object") {
             const serviceMethod = this.generateServiceMethod(p, method, operation)
             const tag = (operation as any).tags?.[0] || "Default"
-            const controllerName = this.sanitizeName(tag)
-            if (!controllers.has(controllerName)) {
-              controllers.set(controllerName, [])
+            // key 用清洁后的 sanitizeName（保证 Map 唯一性）
+            const controllerKey = this.sanitizeName(tag)
+            if (!controllers.has(controllerKey)) {
+              controllers.set(controllerKey, [])
             }
-            controllers.get(controllerName)?.push(serviceMethod)
+            controllers.get(controllerKey)?.push(serviceMethod)
           }
         }
       }
     }
 
-    // ── 3. 写入各 Controller 文件 → controllers/{Tag}.{ext} ──────
-    const controllerNames: string[] = []
-    for (const [controllerName, methods] of controllers) {
+    // ── 3. 写入各 Controller 文件 ─────────────────────────────────
+    const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
+    for (const [controllerKey, methods] of controllers) {
+      // 类名：PascalCase + suffix（代码内永远是合法标识符）
+      const pascalBase = toPascalCase(controllerKey)
+      const className = pascalBase + naming.controllerClassNameSuffix
+      // 文件名：应用用户配置的风格 + suffix
+      const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
+      const fileName = fileBase + (naming.controllerClassNameSuffix
+        ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
+        : "")
+
       const description =
-        (apiDocs.tags || []).find((tag: any) => tag.name === controllerName)?.description || ""
+        (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
+          this.sanitizeName(tag.name) === controllerKey)?.description || ""
       const controllerCode =
         `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
         `const { fetch:request} = requestClass\n\n` +
         `/**\n * ${description}\n */\n` +
-        `export class ${controllerName} {\n${methods.join("\n\n")}\n}\n`
-      fs.writeFileSync(path.join(controllersDir, `${controllerName}.${ext}`), controllerCode, "utf-8")
-      controllerNames.push(controllerName)
+        `export class ${className} {\n${methods.join("\n\n")}\n}\n`
+      fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
+      fileNames.push(fileName)
     }
 
-    // controllers/index.{ext}
-    const controllersIndexCode = controllerNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
+    // controllers/{controllersDirName}/index.{ext}
+    const controllersIndexCode = fileNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
     fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
 
     // ── 4. 根 index 文件 ──────────────────────────────────────────
-    const rootIndexCode = `export * from "./types"\nexport * from "./controllers"\n`
+    const rootIndexCode = `export * from "./${naming.typesDirName}"\nexport * from "./${naming.controllersDirName}"\n`
     fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 

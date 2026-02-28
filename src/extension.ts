@@ -61,6 +61,12 @@ export function activate(context: vscode.ExtensionContext) {
       const framework = config.get("framework") as string
       const outputType = config.get("outputType") as string
       const outputSplit = (config.get("outputSplit") as string) || "single"
+      const namingConfig = {
+        typesDirName: (config.get("naming.typesDirName") as string) || "types",
+        controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
+        controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+        controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+      }
 
       // 右侧 loading
       const loadingRight = vscode.window.createStatusBarItem(
@@ -109,7 +115,8 @@ export function activate(context: vscode.ExtensionContext) {
             framework,
             outputType,
             outputFsPath,
-            outputSplit
+            outputSplit,
+            namingConfig
           )
           vscode.window.showInformationMessage("API文档生成成功！")
         }
@@ -194,6 +201,12 @@ export function activate(context: vscode.ExtensionContext) {
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
+          const namingConfig = {
+            typesDirName: (config.get("naming.typesDirName") as string) || "types",
+            controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
+            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+            controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+          }
 
           let outputFsPath: string | undefined
           if (outputSplit === "byTag") {
@@ -229,7 +242,8 @@ export function activate(context: vscode.ExtensionContext) {
               framework,
               outputType,
               outputFsPath,
-              outputSplit
+              outputSplit,
+              namingConfig
             )
             // 保存成功的 URL 到历史记录
             saveUrlToHistory(selected)
@@ -277,6 +291,12 @@ export function activate(context: vscode.ExtensionContext) {
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
+          const namingConfig = {
+            typesDirName: (config.get("naming.typesDirName") as string) || "types",
+            controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
+            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "PascalCase") as "PascalCase" | "camelCase" | "kebab-case",
+            controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+          }
 
           let outputFsPath: string | undefined
           if (outputSplit === "byTag") {
@@ -312,7 +332,8 @@ export function activate(context: vscode.ExtensionContext) {
               framework,
               outputType,
               outputFsPath,
-              outputSplit
+              outputSplit,
+              namingConfig
             )
             vscode.window.showInformationMessage("API文档生成成功！")
           }

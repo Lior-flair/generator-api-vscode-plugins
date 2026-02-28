@@ -75,6 +75,36 @@
             "按 Tag（模块）拆分，每个模块生成独立文件，并自动生成 index.ts 统一导出"
           ],
           "description": "输出拆分策略：single 单文件输出，byTag 按 Tag 模块拆分为多文件"
+        },
+        "generator-ts-api.naming.typesDirName": {
+          "type": "string",
+          "default": "types",
+          "description": "byTag 模式下类型定义文件夹的名称（默认 types）"
+        },
+        "generator-ts-api.naming.controllersDirName": {
+          "type": "string",
+          "default": "modules",
+          "description": "byTag 模式下请求控制器文件夹的名称（默认 modules）"
+        },
+        "generator-ts-api.naming.controllerFileNameCasing": {
+          "type": "string",
+          "enum": [
+            "PascalCase",
+            "camelCase",
+            "kebab-case"
+          ],
+          "default": "PascalCase",
+          "enumDescriptions": [
+            "大驼峰，如 UserController.ts",
+            "小驼峰，如 userController.ts",
+            "连字符，如 user-controller.ts"
+          ],
+          "description": "byTag 模式下每个 Controller 文件名的命名风格"
+        },
+        "generator-ts-api.naming.controllerClassNameSuffix": {
+          "type": "string",
+          "default": "",
+          "description": "byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）"
         }
       }
     }
