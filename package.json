@@ -62,6 +62,19 @@
           "type": "string",
           "default": "",
           "description": "API文档本地路径"
+        },
+        "generator-ts-api.outputSplit": {
+          "type": "string",
+          "enum": [
+            "single",
+            "byTag"
+          ],
+          "default": "single",
+          "enumDescriptions": [
+            "所有 API 生成到单一文件",
+            "按 Tag（模块）拆分，每个模块生成独立文件，并自动生成 index.ts 统一导出"
+          ],
+          "description": "输出拆分策略：single 单文件输出，byTag 按 Tag 模块拆分为多文件"
         }
       }
     }

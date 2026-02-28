@@ -60,6 +60,7 @@ export function activate(context: vscode.ExtensionContext) {
       const apiDocsPath = config.get("apiDocsPath") as string
       const framework = config.get("framework") as string
       const outputType = config.get("outputType") as string
+      const outputSplit = (config.get("outputSplit") as string) || "single"
 
       // 右侧 loading
       const loadingRight = vscode.window.createStatusBarItem(
@@ -81,20 +82,34 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const generator = getGenerator(apiDocs)
-        const outputPath = await vscode.window.showSaveDialog({
-          title: "选择输出文件位置",
-          filters: {
-            TypeScript: ["ts"],
-            JavaScript: ["js"],
-          },
-        })
+        let outputFsPath: string | undefined
+        if (outputSplit === "byTag") {
+          const folderUri = await vscode.window.showOpenDialog({
+            title: "选择输出目录（按 Tag 拆分）",
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            openLabel: "选择输出目录",
+          })
+          outputFsPath = folderUri?.[0]?.fsPath
+        } else {
+          const outputPath = await vscode.window.showSaveDialog({
+            title: "选择输出文件位置",
+            filters: {
+              TypeScript: ["ts"],
+              JavaScript: ["js"],
+            },
+          })
+          outputFsPath = outputPath?.fsPath
+        }
 
-        if (outputPath) {
+        if (outputFsPath) {
           await generator.generate(
             apiDocs,
             framework,
             outputType,
-            outputPath.fsPath
+            outputFsPath,
+            outputSplit
           )
           vscode.window.showInformationMessage("API文档生成成功！")
         }
@@ -175,18 +190,33 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           const apiDocs = await apiParser.parseFromUrl(selected)
           const generator = getGenerator(apiDocs)
-          const outputPath = await vscode.window.showSaveDialog({
-            title: "选择输出文件位置",
-            filters: {
-              TypeScript: ["ts"],
-              JavaScript: ["js"],
-            },
-          })
+          const config = vscode.workspace.getConfiguration("generator-ts-api")
+          const framework = config.get("framework") as string
+          const outputType = config.get("outputType") as string
+          const outputSplit = (config.get("outputSplit") as string) || "single"
 
-          if (outputPath) {
-            const config = vscode.workspace.getConfiguration("generator-ts-api")
-            const framework = config.get("framework") as string
-            const outputType = config.get("outputType") as string
+          let outputFsPath: string | undefined
+          if (outputSplit === "byTag") {
+            const folderUri = await vscode.window.showOpenDialog({
+              title: "选择输出目录（按 Tag 拆分）",
+              canSelectFolders: true,
+              canSelectFiles: false,
+              canSelectMany: false,
+              openLabel: "选择输出目录",
+            })
+            outputFsPath = folderUri?.[0]?.fsPath
+          } else {
+            const outputPath = await vscode.window.showSaveDialog({
+              title: "选择输出文件位置",
+              filters: {
+                TypeScript: ["ts"],
+                JavaScript: ["js"],
+              },
+            })
+            outputFsPath = outputPath?.fsPath
+          }
+
+          if (outputFsPath) {
             // 添加右侧 loading（拉取/生成）
             loading = vscode.window.createStatusBarItem(
               vscode.StatusBarAlignment.Right,
@@ -198,7 +228,8 @@ export function activate(context: vscode.ExtensionContext) {
               apiDocs,
               framework,
               outputType,
-              outputPath.fsPath
+              outputFsPath,
+              outputSplit
             )
             // 保存成功的 URL 到历史记录
             saveUrlToHistory(selected)
@@ -242,18 +273,33 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           const apiDocs = await apiParser.parseFromFile(fileUri[0].fsPath)
           const generator = getGenerator(apiDocs)
-          const outputPath = await vscode.window.showSaveDialog({
-            title: "选择输出文件位置",
-            filters: {
-              TypeScript: ["ts"],
-              JavaScript: ["js"],
-            },
-          })
+          const config = vscode.workspace.getConfiguration("generator-ts-api")
+          const framework = config.get("framework") as string
+          const outputType = config.get("outputType") as string
+          const outputSplit = (config.get("outputSplit") as string) || "single"
 
-          if (outputPath) {
-            const config = vscode.workspace.getConfiguration("generator-ts-api")
-            const framework = config.get("framework") as string
-            const outputType = config.get("outputType") as string
+          let outputFsPath: string | undefined
+          if (outputSplit === "byTag") {
+            const folderUri = await vscode.window.showOpenDialog({
+              title: "选择输出目录（按 Tag 拆分）",
+              canSelectFolders: true,
+              canSelectFiles: false,
+              canSelectMany: false,
+              openLabel: "选择输出目录",
+            })
+            outputFsPath = folderUri?.[0]?.fsPath
+          } else {
+            const outputPath = await vscode.window.showSaveDialog({
+              title: "选择输出文件位置",
+              filters: {
+                TypeScript: ["ts"],
+                JavaScript: ["js"],
+              },
+            })
+            outputFsPath = outputPath?.fsPath
+          }
+
+          if (outputFsPath) {
             // 添加右侧 loading（生成）
             loading = vscode.window.createStatusBarItem(
               vscode.StatusBarAlignment.Right,
@@ -265,7 +311,8 @@ export function activate(context: vscode.ExtensionContext) {
               apiDocs,
               framework,
               outputType,
-              outputPath.fsPath
+              outputFsPath,
+              outputSplit
             )
             vscode.window.showInformationMessage("API文档生成成功！")
           }

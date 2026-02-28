@@ -34,7 +34,7 @@ export class ApiGenerator {
     // }
   }
 
-  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string): Promise<void> {
+  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single"): Promise<void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
@@ -42,18 +42,101 @@ export class ApiGenerator {
 
       this.initializeTypeNames(apiDocs)
 
-      const code = this.generateCode(apiDocs)
+      if (outputSplit === "byTag") {
+        // 按 Tag 拆分多文件输出
+        this.generateByTag(apiDocs, framework, outputType, outputPath)
+      } else {
+        const code = this.generateCode(apiDocs)
 
-      const outputDir = path.dirname(outputPath)
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true })
+        const outputDir = path.dirname(outputPath)
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true })
+        }
+
+        fs.writeFileSync(outputPath, code, "utf-8")
       }
-
-      fs.writeFileSync(outputPath, code, "utf-8")
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "未知错误"
       throw new Error(`生成API代码失败: ${errorMessage}`)
     }
+  }
+
+  /**
+   * 按 Tag 拆分输出：
+   *  - types.{ext}   汎型类型 + 接口类型 + 参数类型
+   *  - {Tag}.{ext}   每个 Tag 对应的 Controller 类
+   *  - index.{ext}   统一 re-export
+   */
+  private generateByTag(apiDocs: any, framework: string, outputType: string, outputDir: string): void {
+    const ext = outputType === "js" ? "js" : "ts"
+
+    // 重置状态，与 generateCode 的配置一致
+    this.genericTypes = []
+    this.returnType = new Map()
+    this.typeNames = []
+    this.genericEnums = new Map()
+
+    const definitions = apiDocs.definitions || {}
+    for (const [name] of Object.entries(definitions)) {
+      const matchName = name.match(/[«《<]/g) || []
+      if (matchName.length > 0) {
+        this.returnType.set(name, name.replace(/[«《<]/g, "<").replace(/[»》>]/g, ">"))
+        const genericTypesName = name.substring(0, name.search(/[«《<]/g))
+        if (!this.genericTypes.includes(genericTypesName)) {
+          this.genericTypes.push(genericTypesName)
+        }
+      }
+    }
+    const typeNames: string[] = []
+    for (const [name] of Object.entries(definitions)) {
+      const matchName = name.match(/[«《<]/g) || []
+      if (matchName.length === 0 && !this.genericTypes.includes(name)) {
+        typeNames.push(name)
+      }
+    }
+    this.typeNames = Array.from(new Set(typeNames))
+
+    // 收集类型
+    const genericTypesStr = this.generateGenericTypes(apiDocs)
+    const types = this.generateInterfaceType(apiDocs)
+    const { controllers, paramTypes } = this.generateController(apiDocs)
+
+    // ── 子目录路径 ─────────────────────────────────────────────────
+    const typesDir = path.join(outputDir, "types")
+    const controllersDir = path.join(outputDir, "controllers")
+    ;[typesDir, controllersDir].forEach((d) => {
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
+    })
+
+    // ── 1. 写入 types/index.{ext} ──────────────────────────────────
+    const typesCode =
+      `// 生成时间: ${new Date().toISOString()}\n\n` +
+      `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
+      genericTypesStr.join("\n\n") + "\n\n" +
+      types.join("\n\n") + "\n\n" +
+      paramTypes.join("\n\n") + "\n"
+    fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+
+    // ── 2. 写入各 controllers/{Tag}.{ext} ─────────────────────────
+    const controllerNames: string[] = []
+    for (const [controllerName, methods] of controllers) {
+      const description = (apiDocs.tags || []).find((t: any) => t.name === controllerName)?.description || ""
+      const controllerCode =
+        `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
+        `const { fetch:request} = requestClass\n\n` +
+        `/**\n * ${description}\n */\n` +
+        `export class ${controllerName} {\n${methods.join("\n\n")}\n}\n`
+      fs.writeFileSync(path.join(controllersDir, `${controllerName}.${ext}`), controllerCode, "utf-8")
+      controllerNames.push(controllerName)
+    }
+
+    // controllers/index.{ext}
+    const controllersIndexCode = controllerNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
+    fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
+
+    // ── 3. 根 index.{ext} ──────────────────────────────────────────
+    const rootIndexCode = `export * from "./types"\nexport * from "./controllers"\n`
+    fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 
   private isValidApiDoc(doc: any): boolean {
@@ -458,7 +541,7 @@ export class ApiGenerator {
       controllerClasses.push(`\n/**\n * ${description}\n */\nexport class ${controllerName} {\n${methods.join("\n\n")}\n}`)
     }
 
-    return { controllerClasses, paramTypes }
+    return { controllerClasses, paramTypes, controllers }
   }
 
   private getOperationId(path: string, method: string): string {

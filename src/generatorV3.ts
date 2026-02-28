@@ -18,7 +18,8 @@ export class ApiGenerator {
     apiDocs: any,
     framework: string,
     outputType: string,
-    outputPath: string
+    outputPath: string,
+    outputSplit: string = "single"
   ): Promise<void> {
     try {
       // 验证API文档
@@ -29,21 +30,110 @@ export class ApiGenerator {
       // 初始化类型名称
       this.initializeTypeNames(apiDocs)
 
-      // 生成代码
-      const code = this.generateCode(apiDocs, framework, outputType)
+      if (outputSplit === "byTag") {
+        // 按 Tag 拆分多文件输出
+        this.generateByTag(apiDocs, framework, outputType, outputPath)
+      } else {
+        // 生成代码（单文件）
+        const code = this.generateCode(apiDocs, framework, outputType)
 
-      // 确保输出目录存在
-      const outputDir = path.dirname(outputPath)
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true })
+        // 确保输出目录存在
+        const outputDir = path.dirname(outputPath)
+        if (!fs.existsSync(outputDir)) {
+          fs.mkdirSync(outputDir, { recursive: true })
+        }
+
+        // 写入文件
+        fs.writeFileSync(outputPath, code, "utf-8")
       }
-
-      // 写入文件
-      fs.writeFileSync(outputPath, code, "utf-8")
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "未知错误"
       throw new Error(`生成API代码失败: ${errorMessage}`)
     }
+  }
+
+  /**
+   * 按 Tag 拆分输出：
+   *  - types.{ext}   所有类型定义
+   *  - {Tag}.{ext}   每个 Tag 对应的 Controller 类
+   *  - index.{ext}   统一 re-export
+   */
+  private generateByTag(
+    apiDocs: any,
+    framework: string,
+    outputType: string,
+    outputDir: string
+  ): void {
+    const ext = outputType === "js" ? "js" : "ts"
+
+    // ── 子目录路径 ────────────────────────────────────────────────
+    const typesDir = path.join(outputDir, "types")
+    const controllersDir = path.join(outputDir, "controllers")
+    ;[outputDir, typesDir, controllersDir].forEach((d) => {
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
+    })
+
+    // ── 1. 收集类型定义 → types/index.{ext} ──────────────────────
+    const types: string[] = []
+    if (this.isOpenApi3(apiDocs)) {
+      if (apiDocs.components?.schemas) {
+        for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
+          if (this.isSchemaObject(schema) && (schema as any).type === "object") {
+            types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
+          }
+        }
+      }
+    } else {
+      if (apiDocs.definitions) {
+        for (const [name, schema] of Object.entries(apiDocs.definitions)) {
+          if (this.isSchemaObject(schema) && (schema as any).type === "object") {
+            types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
+          }
+        }
+      }
+    }
+    const typesCode = `// 生成时间: ${new Date().toISOString()}\n\n// 类型定义\n${types.join("\n\n")}\n`
+    fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+
+    // ── 2. 按 Tag 分组生成 Controller 方法 ───────────────────────
+    const controllers: Map<string, string[]> = new Map()
+    for (const [p, pathItem] of Object.entries(apiDocs.paths)) {
+      if (pathItem) {
+        for (const [method, operation] of Object.entries(pathItem as any)) {
+          if (operation && typeof operation === "object") {
+            const serviceMethod = this.generateServiceMethod(p, method, operation)
+            const tag = (operation as any).tags?.[0] || "Default"
+            const controllerName = this.sanitizeName(tag)
+            if (!controllers.has(controllerName)) {
+              controllers.set(controllerName, [])
+            }
+            controllers.get(controllerName)?.push(serviceMethod)
+          }
+        }
+      }
+    }
+
+    // ── 3. 写入各 Controller 文件 → controllers/{Tag}.{ext} ──────
+    const controllerNames: string[] = []
+    for (const [controllerName, methods] of controllers) {
+      const description =
+        (apiDocs.tags || []).find((tag: any) => tag.name === controllerName)?.description || ""
+      const controllerCode =
+        `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
+        `const { fetch:request} = requestClass\n\n` +
+        `/**\n * ${description}\n */\n` +
+        `export class ${controllerName} {\n${methods.join("\n\n")}\n}\n`
+      fs.writeFileSync(path.join(controllersDir, `${controllerName}.${ext}`), controllerCode, "utf-8")
+      controllerNames.push(controllerName)
+    }
+
+    // controllers/index.{ext}
+    const controllersIndexCode = controllerNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
+    fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
+
+    // ── 4. 根 index 文件 ──────────────────────────────────────────
+    const rootIndexCode = `export * from "./types"\nexport * from "./controllers"\n`
+    fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 
   private isValidApiDoc(doc: any): boolean {
