@@ -148,16 +148,46 @@ export interface XX{
 
 MIT License
 
-
 ## 版本差异
 
-### `v11.0`
-说明：添加`swagger2.0`生成
+### 重大更新 `v0.1.0`
 
-### `v6.0` 
-说明： 修复`static`命名混乱问题：直接使用链接最后生成，重复则继续向前取
-### `v5.0`
-说明： `static`命名混乱
+#### `settings.json`添加配置项
+
+1. `generator-ts-api.outputSplit`：输出拆分策略，支持按 Tag 拆分生成多文件
+
+	1. `single`：所有 API 生成到单一文件
+
+	2. `byTag`：按 Tag（模块）拆分，每个模块生成独立文件，并自动生成 index.ts 统一导出
+
+		1. ```
+			📁 选定目录 /
+			├── definitions/                         ← 如果 typesDirName 设为 "definitions"
+			│   └── index.ts                         
+			├── services/                            ← 如果 controllersDirName 设为 "services"
+			│   ├── account-service.ts               ← fileNameCasing 为 kebab-case 的产物
+			│   ├── user-order-service.ts            
+			│   └── index.ts                         ← 内部包含 `export * from "./user-order-service"`
+			└── index.ts                             ← export 各文件夹
+			```
+
+2. `generator-ts-api.naming`：输出命名规范
+
+	1. `generator-ts-api.naming.typesDirName`：byTag 模式下类型定义文件夹的名称（默认 types）
+	2. `generator-ts-api.naming.controllersDirName`：byTag 模式下请求控制器文件夹的名称（默认 modules）
+	3. `generator-ts-api.naming.controllerFileNameCasing`：byTag 模式下每个 Controller 文件名的命名风格
+		1. `default`：保持 Tag 原始名称（仅进行特殊字符过滤），与旧版行为一致
+		2. `PascalCase`：大驼峰，如 UserController.ts
+		3. `camelCase`：小驼峰，如 userController.ts
+		4. `kebab-case`：连字符，如 user-controller.ts
+	4. `generator-ts-api.naming.controllerClassNameSuffix`：byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）
+
+
+
+
+
+### `v0.0.16`
+说明：添加`swagger2.0`生成
 
 ## 当 URL 需要账号/密码时的交互行为
 
