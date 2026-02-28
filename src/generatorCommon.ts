@@ -70,6 +70,201 @@ export function getControllerMethodNameSet(controllerName: string): Set<string> 
   return (globalThis as any)._controllerMethodNames[controllerName] as Set<string>
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HTTP 客户端配置
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 支持的 HTTP 客户端模式 */
+export type HttpClientMode = "axios" | "axios-wrapper" | "fetch" | "custom"
+
+export interface HttpClientConfig {
+  /** 客户端模式 */
+  mode: HttpClientMode
+  /** import 路径；axios 默认 'axios'，axios-wrapper 默认 '@/utils/request'，fetch 留空，custom 必填 */
+  requestImportPath: string
+  /** 是否在输出目录生成 request.ts 样板文件（仅首次，不覆盖） */
+  generateRequestScaffold: boolean
+  /** 自定义模板文件路径（优先于 customTemplateString） */
+  customTemplateFile?: string
+  /** 自定义内联模板字符串；占位符：{{method}} {{METHOD}} {{url}} {{params}} {{body}} {{returnType}} {{methodName}} {{contentType}} */
+  customTemplateString?: string
+}
+
+export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
+  mode: "axios-wrapper",
+  requestImportPath: "@/utils/request",
+  generateRequestScaffold: false,
+}
+
+/**
+ * 根据 HttpClientConfig 生成 import 代码段（插入到生成文件顶部）
+ */
+export function buildImportSnippet(cfg: HttpClientConfig): string {
+  switch (cfg.mode) {
+    case "axios":
+      return `import axios from '${cfg.requestImportPath || "axios"}'`
+    case "fetch":
+      return ""
+    case "custom":
+      return ""
+    case "axios-wrapper":
+    default:
+      return (
+        `import requestClass, { getConfigs, type RequestConfig } from "${cfg.requestImportPath || "@/utils/request"}"\n` +
+        `const { fetch:request} = requestClass`
+      )
+  }
+}
+
+/**
+ * 为 axios / fetch / custom 模式生成方法体内容（不含 static 签名包裹）。
+ * axios-wrapper 模式返回空字符串，调用方使用自有模板。
+ */
+export function buildMethodBody(
+  cfg: HttpClientConfig,
+  method: string,
+  processedPath: string,
+  requestBody: string,
+  requestContentType: string,
+  returnType: string,
+  methodName: string
+): string {
+  const upperMethod = method.toUpperCase()
+  switch (cfg.mode) {
+    case "axios": {
+      const isGetLike = ["GET", "DELETE", "HEAD"].includes(upperMethod)
+      if (isGetLike) {
+        return `return axios.${method.toLowerCase()}(\`${processedPath}\`, { params }).then((r: any) => r.data as ${returnType})`
+      }
+      const bodyRef = requestBody
+        ? 'params["body"]'
+        : requestContentType === "multipart/form-data"
+        ? 'params["formData"]'
+        : "params"
+      return `return axios.${method.toLowerCase()}(\`${processedPath}\`, ${bodyRef}, { params }).then((r: any) => r.data as ${returnType})`
+    }
+    case "fetch": {
+      const isGetLike = ["GET", "DELETE", "HEAD"].includes(upperMethod)
+      if (isGetLike) {
+        return (
+          `const _qs = new URLSearchParams(params as any).toString()\n` +
+          `    return fetch(\`${processedPath}\${_qs ? '?' + _qs : ''}\`).then(r => r.json()) as Promise<${returnType}>`
+        )
+      }
+      const bodyRef = requestBody
+        ? 'params["body"]'
+        : requestContentType === "multipart/form-data"
+        ? 'params["formData"]'
+        : "params"
+      return (
+        `return fetch(\`${processedPath}\`, {\n` +
+        `      method: '${upperMethod}',\n` +
+        `      body: JSON.stringify(${bodyRef}),\n` +
+        `      headers: { 'Content-Type': '${requestContentType || "application/json"}' }\n` +
+        `    }).then(r => r.json()) as Promise<${returnType}>`
+      )
+    }
+    case "custom": {
+      let template = ""
+      if (cfg.customTemplateFile) {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const fs = require("fs")
+          template = fs.readFileSync(cfg.customTemplateFile, "utf-8")
+        } catch {
+          template = cfg.customTemplateString || ""
+        }
+      } else {
+        template = cfg.customTemplateString || ""
+      }
+      if (!template) return "    // custom template not configured"
+      return template
+        .replace(/\{\{method\}\}/g, method.toLowerCase())
+        .replace(/\{\{METHOD\}\}/g, upperMethod)
+        .replace(/\{\{url\}\}/g, processedPath)
+        .replace(/\{\{params\}\}/g, "params")
+        .replace(/\{\{body\}\}/g, requestBody ? 'params["body"]' : "params")
+        .replace(/\{\{returnType\}\}/g, returnType)
+        .replace(/\{\{methodName\}\}/g, methodName)
+        .replace(/\{\{contentType\}\}/g, requestContentType || "application/json")
+    }
+    default:
+      return "" // axios-wrapper：调用方使用内联模板
+  }
+}
+
+/**
+ * 在 outputDir 生成 request.ts 样板文件（文件已存在时跳过，不覆盖）
+ */
+export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientConfig, ext: string = "ts"): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require("fs")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path")
+  const scaffoldPath = path.join(outputDir, `request.${ext}`)
+  if (fs.existsSync(scaffoldPath)) return // 不覆盖已有文件
+
+  let content = ""
+  switch (cfg.mode) {
+    case "axios":
+      content =
+        `import axios from '${cfg.requestImportPath || "axios"}'\n\n` +
+        `const instance = axios.create({\n  baseURL: '',\n  timeout: 10000,\n})\n\n` +
+        `// TODO: Add request interceptor here\n` +
+        `instance.interceptors.request.use(\n` +
+        `  (config) => {\n    // e.g. config.headers['Authorization'] = 'Bearer ' + getToken()\n    return config\n  },\n` +
+        `  (error) => Promise.reject(error)\n)\n\n` +
+        `// TODO: Add response interceptor here\n` +
+        `instance.interceptors.response.use(\n` +
+        `  (response) => response,\n` +
+        `  (error) => Promise.reject(error)\n)\n\n` +
+        `export default instance\n`
+      break
+    case "axios-wrapper":
+      content =
+        `import axios, { type AxiosRequestConfig } from 'axios'\n\n` +
+        `export interface RequestConfig extends AxiosRequestConfig {}\n\n` +
+        `const instance = axios.create({\n  baseURL: '',\n  timeout: 10000,\n})\n\n` +
+        `// TODO: Add request interceptor here\n` +
+        `instance.interceptors.request.use(\n` +
+        `  (config) => {\n    // e.g. config.headers['Authorization'] = 'Bearer ' + getToken()\n    return config\n  },\n` +
+        `  (error) => Promise.reject(error)\n)\n\n` +
+        `// TODO: Add response interceptor here\n` +
+        `instance.interceptors.response.use(\n` +
+        `  (response) => response.data,\n` +
+        `  (error) => Promise.reject(error)\n)\n\n` +
+        `export function getConfigs(method: string, contentType: string, url: string, options: RequestConfig = {}): AxiosRequestConfig {\n` +
+        `  return { method, url, headers: { 'Content-Type': contentType, ...(options.headers || {}) }, ...options }\n` +
+        `}\n\n` +
+        `function fetchFn(configs: AxiosRequestConfig, resolve: (v: any) => void, reject: (e: any) => void): void {\n` +
+        `  instance(configs).then(resolve).catch(reject)\n` +
+        `}\n\n` +
+        `const requestClass = { fetch: fetchFn }\nexport default requestClass\n`
+      break
+    case "fetch":
+      content =
+        `// Fetch-based request utility\n\n` +
+        `// TODO: Add request interceptor here\n` +
+        `async function requestInterceptor(url: string, options: RequestInit): Promise<[string, RequestInit]> {\n` +
+        `  // e.g. options.headers = { ...options.headers, Authorization: 'Bearer ' + getToken() }\n` +
+        `  return [url, options]\n}\n\n` +
+        `// TODO: Add response interceptor here\n` +
+        `async function responseInterceptor(response: Response): Promise<Response> {\n` +
+        `  if (!response.ok) throw new Error(response.statusText)\n` +
+        `  return response\n}\n\n` +
+        `export async function fetchRequest<T>(url: string, options: RequestInit = {}): Promise<T> {\n` +
+        `  const [finalUrl, finalOptions] = await requestInterceptor(url, options)\n` +
+        `  const response = await fetch(finalUrl, finalOptions)\n` +
+        `  const intercepted = await responseInterceptor(response)\n` +
+        `  return intercepted.json() as Promise<T>\n}\n`
+      break
+    default:
+      return // custom: 跳过生成
+  }
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
+  fs.writeFileSync(scaffoldPath, content, "utf-8")
+}
+
 export function buildUniqueMethodName(path: string, controllerName: string, method: string, operationId?: string): string {
   const usedNames = getControllerMethodNameSet(controllerName)
   const pathParts = path.split("/").filter(Boolean)

@@ -3,14 +3,19 @@ import * as path from "path"
 import { OpenAPIV3 } from "openapi-types"
 import {
   buildControllerNames,
+  buildImportSnippet,
+  buildMethodBody,
   buildUniqueMethodName,
+  DEFAULT_HTTP_CLIENT_CONFIG,
   DEFAULT_NAMING,
+  type HttpClientConfig,
   type NamingConfig,
   sanitizeName,
 } from "./generatorCommon"
 
 export class ApiGenerator {
   private typeNames: string[] = []
+  private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
 
   private initializeTypeNames(apiDocs: any): void {
     // OpenAPI 3.x schemas
@@ -27,13 +32,17 @@ export class ApiGenerator {
     outputType: string,
     outputPath: string,
     outputSplit: string = "single",
-    namingConfig: NamingConfig = DEFAULT_NAMING
+    namingConfig: NamingConfig = DEFAULT_NAMING,
+    httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
   ): Promise<void> {
     try {
       // 验证API文档
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
       }
+
+      // 保存 HTTP 客户端配置供内部方法使用
+      this.httpClientConfig = httpClientConfig
 
       // 初始化类型名称
       this.initializeTypeNames(apiDocs)
@@ -131,9 +140,9 @@ export class ApiGenerator {
       const description =
         (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
           this.sanitizeName(tag.name) === controllerKey)?.description || ""
+      const importLine = buildImportSnippet(this.httpClientConfig)
       const controllerCode =
-        `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
-        `const { fetch:request} = requestClass\n\n` +
+        (importLine ? importLine + "\n\n" : "") +
         `/**\n * ${description}\n */\n` +
         `export class ${className} {\n${methods.join("\n\n")}\n}\n`
       fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
@@ -235,18 +244,12 @@ ${methods.join("\n\n")}
     }
 
     // 组合最终代码
-    const code = `
-import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"
-const { fetch:request} = requestClass
-
-// 生成时间: ${new Date().toISOString()}
-
-// 类型定义
-${types.join("\n\n")}
-
-// Controller类
-${controllerClasses.join("\n\n")}
-`
+    const importLine = buildImportSnippet(this.httpClientConfig)
+    const code =
+      (importLine ? importLine + "\n\n" : "") +
+      `// 生成时间: ${new Date().toISOString()}\n\n` +
+      `// 类型定义\n${types.join("\n\n")}\n\n` +
+      `// Controller类\n${controllerClasses.join("\n\n")}\n`
 
     return code
   }
@@ -375,28 +378,30 @@ ${controllerClasses.join("\n\n")}
     // 处理安全定义
     const securityConfig = this.getSecurityConfig(operation)
 
-    return `  /**
-   * ${operation.summary || ""}${
-      operation.description ? "\n  * " + operation.description : ""
-    }${operation.deprecated ? "\n  * @deprecated true" : ""}${
-      operation.callbacks ? "\n * @returns "+operation.callbacks : ""
+    const comment =
+      `  /**\n   * ${operation.summary || ""}` +
+      (operation.description ? "\n   * " + operation.description : "") +
+      (operation.deprecated ? "\n   * @deprecated true" : "") +
+      (operation.callbacks ? "\n   * @returns " + operation.callbacks : "") +
+      "\n   */"
+
+    if (this.httpClientConfig.mode !== "axios-wrapper") {
+      // axios / fetch / custom：async/await 风格，无 options 参数
+      const cleanParamsType = paramsType.replace(/, options: RequestConfig = \{\}\s*$/, "")
+      const body = buildMethodBody(
+        this.httpClientConfig,
+        method,
+        processedPath,
+        requestBody,
+        requestContentType,
+        returnType,
+        methodName
+      )
+      return `${comment}\n  static async ${methodName}(${cleanParamsType}): Promise<${returnType}> {\n    ${body}\n  }`
     }
-   */
-  static ${methodName}(${paramsType}): Promise<${returnType}> {
-    return new Promise((resolve, reject) => {
-      const url = \`${processedPath}\`;
-      const configs = getConfigs(
-        '${method}',
-        '${requestContentType}',
-        url,
-        options
-      );
-      ${params}
-      ${requestBody}
-      ${securityConfig}
-      request(configs, resolve, reject);
-    });
-  }`
+
+    // axios-wrapper：保留原有 Promise + getConfigs + request 风格
+    return `${comment}\n  static ${methodName}(${paramsType}): Promise<${returnType}> {\n    return new Promise((resolve, reject) => {\n      const url = \`${processedPath}\`;\n      const configs = getConfigs(\n        '${method}',\n        '${requestContentType}',\n        url,\n        options\n      );\n      ${params}\n      ${requestBody}\n      ${securityConfig}\n      request(configs, resolve, reject);\n    });\n  }`
   }
 
   private getSecurityConfig(operation: any): string {

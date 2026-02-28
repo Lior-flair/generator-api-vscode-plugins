@@ -1,9 +1,15 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
+import * as path from "path"
 import * as vscode from "vscode"
 import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
+import {
+  generateRequestScaffoldFile,
+  type HttpClientConfig,
+  type HttpClientMode,
+} from "./generatorCommon"
 
 // 存储 URL 历史记录
 const MAX_HISTORY_LENGTH = 10
@@ -13,6 +19,39 @@ let urlHistory: string[] = [
   "http://192.168.18.15:9090/v3/api-docs",
   "http://localhost:8080/v3/api-docs",
 ]
+
+/** 从 VS Code 配置构建 HttpClientConfig，自动填充各档默认 import 路径 */
+function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClientConfig {
+  const mode = ((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
+  let requestImportPath = (config.get("requestImportPath") as string) || ""
+  if (!requestImportPath) {
+    switch (mode) {
+      case "axios": requestImportPath = "axios"; break
+      case "axios-wrapper": requestImportPath = "@/utils/request"; break
+      default: requestImportPath = ""
+    }
+  }
+  return {
+    mode,
+    requestImportPath,
+    generateRequestScaffold: (config.get("generateRequestScaffold") as boolean) || false,
+    customTemplateFile: (config.get("customTemplate.templateFile") as string) || undefined,
+    customTemplateString: (config.get("customTemplate.templateString") as string) || undefined,
+  }
+}
+
+/** 若配置了 generateRequestScaffold，在输出目录生成 request.ts 样板（不覆盖已有文件） */
+function maybeGenerateScaffold(
+  outputFsPath: string,
+  outputSplit: string,
+  httpClientConfig: HttpClientConfig,
+  outputType: string
+): void {
+  if (!httpClientConfig.generateRequestScaffold) return
+  const outputDir = outputSplit === "byTag" ? outputFsPath : path.dirname(outputFsPath)
+  const ext = outputType === "js" ? "js" : "ts"
+  generateRequestScaffoldFile(outputDir, httpClientConfig, ext)
+}
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -110,14 +149,17 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (outputFsPath) {
+          const httpClientConfig = buildHttpClientConfig(config)
           await generator.generate(
             apiDocs,
             framework,
             outputType,
             outputFsPath,
             outputSplit,
-            namingConfig
+            namingConfig,
+            httpClientConfig
           )
+          maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
           vscode.window.showInformationMessage("API文档生成成功！")
         }
       } catch (error: unknown) {
@@ -237,14 +279,17 @@ export function activate(context: vscode.ExtensionContext) {
             )
             loading.text = "$(sync~spin) 生成中..."
             loading.show()
+            const httpClientConfig = buildHttpClientConfig(config)
             await generator.generate(
               apiDocs,
               framework,
               outputType,
               outputFsPath,
               outputSplit,
-              namingConfig
+              namingConfig,
+              httpClientConfig
             )
+            maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
             // 保存成功的 URL 到历史记录
             saveUrlToHistory(selected)
             vscode.window.showInformationMessage("API文档生成成功！")
@@ -327,14 +372,17 @@ export function activate(context: vscode.ExtensionContext) {
             )
             loading.text = "$(sync~spin) 生成中..."
             loading.show()
+            const httpClientConfig = buildHttpClientConfig(config)
             await generator.generate(
               apiDocs,
               framework,
               outputType,
               outputFsPath,
               outputSplit,
-              namingConfig
+              namingConfig,
+              httpClientConfig
             )
+            maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
             vscode.window.showInformationMessage("API文档生成成功！")
           }
         } catch (error: unknown) {

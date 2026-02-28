@@ -107,6 +107,43 @@
           "type": "string",
           "default": "",
           "description": "byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）"
+        },
+        "generator-ts-api.httpClient": {
+          "type": "string",
+          "enum": [
+            "axios-wrapper",
+            "axios",
+            "fetch",
+            "custom"
+          ],
+          "default": "axios-wrapper",
+          "enumDescriptions": [
+            "（默认）保持原有风格：通过 getConfigs + request 包装器调用，import 路径由 requestImportPath 控制",
+            "axios 直调：生成 axios.get / axios.post 风格，import axios from '...'，方法改为 async/await",
+            "原生 fetch 直调：无需 import，生成 fetch(...).then(r => r.json()) 风格，方法改为 async/await",
+            "自定义模板：方法体由 customTemplate.templateFile 或 customTemplate.templateString 渲染"
+          ],
+          "description": "生成代码使用的 HTTP 客户端模式"
+        },
+        "generator-ts-api.requestImportPath": {
+          "type": "string",
+          "default": "",
+          "description": "request 的 import 路径。axios-wrapper 默认 @/utils/request，axios 默认 axios，fetch 无需填写，custom 模式下留空则不生成 import"
+        },
+        "generator-ts-api.generateRequestScaffold": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否在输出目录生成 request.ts 样板文件（含拦截器占位注释）。文件已存在时不覆盖"
+        },
+        "generator-ts-api.customTemplate.templateFile": {
+          "type": "string",
+          "default": "",
+          "description": "自定义模板文件路径（.txt 等）。优先于 customTemplate.templateString。占位符：{{method}} {{METHOD}} {{url}} {{params}} {{body}} {{returnType}} {{methodName}} {{contentType}}"
+        },
+        "generator-ts-api.customTemplate.templateString": {
+          "type": "string",
+          "default": "",
+          "description": "自定义内联模板字符串（templateFile 为空时使用）。占位符同上"
         }
       }
     }

@@ -4,8 +4,12 @@ import { OpenAPIV2 } from "openapi-types"
 import { SchemaObject } from "openapi-typescript"
 import {
   buildControllerNames,
+  buildImportSnippet,
+  buildMethodBody,
   buildUniqueMethodName,
+  DEFAULT_HTTP_CLIENT_CONFIG,
   DEFAULT_NAMING,
+  type HttpClientConfig,
   type NamingConfig,
   sanitizeName,
 } from "./generatorCommon"
@@ -28,6 +32,8 @@ export class ApiGenerator {
    * 类型的properties中有enum则定义枚举，先有名字后生成enum
    */
   private genericEnums: Map<string, string[]> = new Map()
+  /** 当前生成任务的 HTTP 客户端配置 */
+  private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
 
   private initializeTypeNames(apiDocs: any): void {
     // if (apiDocs.components?.schemas) {
@@ -42,12 +48,13 @@ export class ApiGenerator {
     // }
   }
 
-  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING): Promise<void> {
+  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG): Promise<void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
       }
 
+      this.httpClientConfig = httpClientConfig
       this.initializeTypeNames(apiDocs)
 
       if (outputSplit === "byTag") {
@@ -133,9 +140,9 @@ export class ApiGenerator {
       const description = (apiDocs.tags || []).find((t: any) =>
         t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
       )?.description || ""
+      const importLine = buildImportSnippet(this.httpClientConfig)
       const controllerCode =
-        `import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\n` +
-        `const { fetch:request} = requestClass\n\n` +
+        (importLine ? importLine + "\n\n" : "") +
         `/**\n * ${description}\n */\n` +
         `export class ${className} {\n${methods.join("\n\n")}\n}\n`
       fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
@@ -480,20 +487,30 @@ export class ApiGenerator {
         const requestContentType = (op.parameters || []).some((p: any) => p.in === "formData") ? "" : "application/json"
         // const requestContentType = (op.parameters || []).some((p: any) => p.in === "formData") ? "multipart/form-data" : "application/json"
 
-        const methodCode = `  /**\n* ${op.summary || ""}${op.description && op.description !== op.summary ? "\n* " + op.description : ""}${op.deprecated ? "\n* @deprecated true" : ""}${op.example ? "\n* @example" + op.example : ""}\n*/
-  static ${methodName}(${paramsTypeUsage}): Promise<${returnType}> {
-    return new Promise((resolve, reject) => {
-      const url = \`${processedPath}\`;
-      ${optionsAssignment}
-      const configs = getConfigs(
-        '${method}',
-        '${requestContentType}',
-        url,
-        finalOptions
-      );
-      request(configs, resolve, reject);
-    });
-  }`
+        const methodComment =
+          `  /**\n* ${op.summary || ""}` +
+          (op.description && op.description !== op.summary ? "\n* " + op.description : "") +
+          (op.deprecated ? "\n* @deprecated true" : "") +
+          (op.example ? "\n* @example" + op.example : "") +
+          "\n*/"
+
+        let methodCode: string
+        if (this.httpClientConfig.mode !== "axios-wrapper") {
+          // axios / fetch / custom：async/await 风格，无 options 参数
+          const cleanParams = paramsTypeUsage.replace(/, options: RequestConfig = \{\}$/, "")
+          const body = buildMethodBody(
+            this.httpClientConfig,
+            method,
+            processedPath,
+            hasBody ? "body" : "",
+            requestContentType,
+            returnType,
+            methodName
+          )
+          methodCode = `${methodComment}\n  static async ${methodName}(${cleanParams}): Promise<${returnType}> {\n    ${body}\n  }`
+        } else {
+          methodCode = `${methodComment}\n  static ${methodName}(${paramsTypeUsage}): Promise<${returnType}> {\n    return new Promise((resolve, reject) => {\n      const url = \`${processedPath}\`;\n      ${optionsAssignment}\n      const configs = getConfigs(\n        '${method}',\n        '${requestContentType}',\n        url,\n        finalOptions\n      );\n      request(configs, resolve, reject);\n    });\n  }`
+        }
 
         controllers.get(controllerName)?.push(methodCode)
       }
@@ -539,7 +556,16 @@ export class ApiGenerator {
     // generate controllers and parameter types
     const { controllerClasses, paramTypes } = this.generateController(apiDocs)
 
-    const code = `\nimport requestClass, { getConfigs, type RequestConfig } from "@/utils/request"\nconst { fetch:request} = requestClass\n\n// 生成时间: ${new Date().toISOString()}\n\n// 泛型类型\nexport type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n${genericTypesStr.join("\n\n")}\n\n// 类型定义\n${types.join("\n\n")}\n\n// 参数类型\n${paramTypes.join("\n\n")}\n\n// Controller类\n${controllerClasses.join("\n\n")}\n`
+    const importLine = buildImportSnippet(this.httpClientConfig)
+    const code =
+      (importLine ? importLine + "\n\n" : "") +
+      `// 生成时间: ${new Date().toISOString()}\n\n` +
+      `// 泛型类型\n` +
+      `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
+      genericTypesStr.join("\n\n") + "\n\n" +
+      `// 类型定义\n` + types.join("\n\n") + "\n\n" +
+      `// 参数类型\n` + paramTypes.join("\n\n") + "\n\n" +
+      `// Controller类\n` + controllerClasses.join("\n\n") + "\n"
 
     return code
   }
