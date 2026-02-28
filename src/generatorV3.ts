@@ -1,50 +1,14 @@
 import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV3 } from "openapi-types"
-
-/** byTag 模式命名配置 */
-interface NamingConfig {
-  /** 类型定义文件夹名，默认 types */
-  typesDirName: string
-  /** Controller 文件夹名，默认 controllers */
-  controllersDirName: string
-  /** Controller 文件名命名风格: default | PascalCase | camelCase | kebab-case */
-  controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
-  /** Controller 类名及文件名后缀，默认空 */
-  controllerClassNameSuffix: string
-}
-
-const DEFAULT_NAMING: NamingConfig = {
-  typesDirName: "types",
-  controllersDirName: "controllers",
-  controllerFileNameCasing: "default",
-  controllerClassNameSuffix: "",
-}
-
-// ── case 转换工具 ───────────────────────────────────────────────
-/** 将任意字符串转为 PascalCase（类名总是大驼峰） */
-function toPascalCase(s: string): string {
-  return s
-    .replace(/[-_]+(.)/g, (_, c: string) => c.toUpperCase())
-    .replace(/^(.)/, (_, c: string) => c.toUpperCase())
-}
-/** 将 PascalCase / 任意字符串转为 camelCase */
-function toCamelCase(s: string): string {
-  const p = toPascalCase(s)
-  return p.charAt(0).toLowerCase() + p.slice(1)
-}
-/** 将 PascalCase / 任意字符串转为 kebab-case */
-function toKebabCase(s: string): string {
-  return toPascalCase(s)
-    .replace(/([A-Z])/g, (m, c: string, offset: number) => (offset === 0 ? c.toLowerCase() : "-" + c.toLowerCase()))
-}
-/** 根据配置转换文件名风格 */
-function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
-  if (casing === "default") return s        // 保持 sanitizeName 结果原样，与旧版一致
-  if (casing === "kebab-case") return toKebabCase(s)
-  if (casing === "camelCase") return toCamelCase(s)
-  return toPascalCase(s)
-}
+import {
+  applyFileCasing,
+  buildUniqueMethodName,
+  DEFAULT_NAMING,
+  type NamingConfig,
+  sanitizeName,
+  toPascalCase,
+} from "./generatorCommon"
 
 export class ApiGenerator {
   private typeNames: string[] = []
@@ -163,9 +127,13 @@ export class ApiGenerator {
     // ── 3. 写入各 Controller 文件 ─────────────────────────────────
     const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
     for (const [controllerKey, methods] of controllers) {
-      // 类名：PascalCase + suffix（代码内永远是合法标识符）
-      const pascalBase = toPascalCase(controllerKey)
-      const className = pascalBase + naming.controllerClassNameSuffix
+      // 类名：default 时保持 sanitizeName，其它风格使用 PascalCase
+      const classBase = naming.controllerFileNameCasing === "default"
+        ? this.sanitizeName(controllerKey)
+        : toPascalCase(controllerKey)
+      const className = naming.controllerFileNameCasing === "default"
+        ? this.sanitizeName(classBase + naming.controllerClassNameSuffix)
+        : classBase + naming.controllerClassNameSuffix
       // 文件名：应用用户配置的风格 + suffix
       const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
       const fileName = fileBase + (naming.controllerClassNameSuffix
@@ -304,8 +272,7 @@ ${controllerClasses.join("\n\n")}
   }
 
   private sanitizeName(name: string): string {
-    // 替换特殊字符为下划线，保留中文
-    return name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, "_")
+    return sanitizeName(name)
   }
 
   private generateTypeDefinition(
@@ -340,75 +307,14 @@ ${controllerClasses.join("\n\n")}
     method: string,
     operation: any
   ): string {
-    // 唯一性集合静态存储在 controller 作用域
-    if (!(globalThis as any)._controllerMethodNames) {
-      ;(globalThis as any)._controllerMethodNames = {}
-    }
     const tag = operation.tags?.[0] || "Default"
     const controllerName = this.sanitizeName(tag)
-    if (!(globalThis as any)._controllerMethodNames[controllerName]) {
-      ;(globalThis as any)._controllerMethodNames[controllerName] = new Set()
-    }
-    const usedNames: Set<string> = (globalThis as any)._controllerMethodNames[
-      controllerName
-    ]
-
-    // 1. 只用 path 生成 methodName
-    const pathParts = path.split("/").filter(Boolean)
-    let partStartIndex = pathParts.length > 0 ? pathParts.length - 1 : -1
-    let partsIndex = []
-    const isParam = (part: string) => /^\{.+\}$/.test(part)
-    let methodName = ""
-    let bySuffix = ""
-
-    while (partStartIndex >= 0) {
-      const part = pathParts[partStartIndex]
-      if (isParam(part)) {
-        partStartIndex--
-        // 提取参数名
-        const paramName = part.replace(/[{}]/g, "")
-        if (!bySuffix) {
-          if (!methodName.includes("By")) {
-            bySuffix =
-              "By" + paramName.charAt(0).toUpperCase() + paramName.slice(1)
-          } else {
-            bySuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1)
-          }
-        }
-      } else {
-        partsIndex.unshift(partStartIndex)
-        let n_methodName = partsIndex
-          .map((item) => {
-            const str = pathParts[item] || ""
-            if (!str) return ""
-            return str.charAt(0).toUpperCase() + str.slice(1)
-          })
-          .join("")
-        n_methodName += bySuffix
-        if (usedNames.has(`${controllerName}.${n_methodName}`)) {
-          partStartIndex--
-        } else {
-          partStartIndex = -1
-        }
-      }
-    }
-    methodName = partsIndex
-      .map((item) => {
-        const str = pathParts[item] || ""
-        if (!str) return ""
-        return str.charAt(0).toUpperCase() + str.slice(1)
-      })
-      .join("")
-    methodName = methodName + bySuffix
-
-    // 如果 methodName 为空或已全部重复，则用 operationId
-    if (!methodName || usedNames.has(`${controllerName}.${methodName}`)) {
-      methodName = this.sanitizeName(
-        operation.operationId || this.getOperationId(path, method)
-      )
-    }
-
-    usedNames.add(`${controllerName}.${methodName}`)
+    const methodName = buildUniqueMethodName(
+      path,
+      controllerName,
+      method,
+      operation.operationId
+    )
 
     const paramsType = this.getParamsType(operation)
     const returnType = this.getReturnType(operation)
@@ -714,14 +620,6 @@ ${controllerClasses.join("\n\n")}
 
   private isParameterObject(param: any): boolean {
     return !("$ref" in param)
-  }
-
-  private getOperationId(path: string, method: string): string {
-    const pathParts = path.split("/").filter(Boolean)
-    const lastPart = pathParts[pathParts.length - 1]
-    return `${method.toLowerCase()}${
-      lastPart.charAt(0).toUpperCase() + lastPart.slice(1)
-    }`
   }
 
   private getRequestContentType(operation: any): string {

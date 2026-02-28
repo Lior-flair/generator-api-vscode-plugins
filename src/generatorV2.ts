@@ -2,41 +2,15 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV2 } from "openapi-types"
 import { SchemaObject } from "openapi-typescript"
+import {
+  applyFileCasing,
+  buildUniqueMethodName,
+  DEFAULT_NAMING,
+  type NamingConfig,
+  sanitizeName,
+  toPascalCase,
+} from "./generatorCommon"
 
-/** byTag 模式命名配置 */
-interface NamingConfig {
-  typesDirName: string
-  controllersDirName: string
-  controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
-  controllerClassNameSuffix: string
-}
-
-const DEFAULT_NAMING: NamingConfig = {
-  typesDirName: "types",
-  controllersDirName: "controllers",
-  controllerFileNameCasing: "default",
-  controllerClassNameSuffix: "",
-}
-
-function toPascalCase(s: string): string {
-  return s
-    .replace(/[-_]+(.)/g, (_, c: string) => c.toUpperCase())
-    .replace(/^(.)/, (_, c: string) => c.toUpperCase())
-}
-function toCamelCase(s: string): string {
-  const p = toPascalCase(s)
-  return p.charAt(0).toLowerCase() + p.slice(1)
-}
-function toKebabCase(s: string): string {
-  return toPascalCase(s)
-    .replace(/([A-Z])/g, (m, c: string, offset: number) => (offset === 0 ? c.toLowerCase() : "-" + c.toLowerCase()))
-}
-function applyFileCasing(s: string, casing: NamingConfig["controllerFileNameCasing"]): string {
-  if (casing === "default") return s        // 保持 sanitizeName 结果原样，与旧版一致
-  if (casing === "kebab-case") return toKebabCase(s)
-  if (casing === "camelCase") return toCamelCase(s)
-  return toPascalCase(s)
-}
 export class ApiGenerator {
   /**
    * 泛型类型
@@ -155,9 +129,13 @@ export class ApiGenerator {
     // ── 2. 写入各 {controllersDirName}/{fileName}.{ext} ───────────
     const fileNames: string[] = []
     for (const [controllerKey, methods] of controllers) {
-      // 类名：PascalCase + suffix（代码内永远是合法标识符）
-      const pascalBase = toPascalCase(controllerKey)
-      const className = pascalBase + naming.controllerClassNameSuffix
+      // 类名：default 时保持 sanitizeName，其它风格使用 PascalCase
+      const classBase = naming.controllerFileNameCasing === "default"
+        ? this.sanitizeName(controllerKey)
+        : toPascalCase(controllerKey)
+      const className = naming.controllerFileNameCasing === "default"
+        ? this.sanitizeName(classBase + naming.controllerClassNameSuffix)
+        : classBase + naming.controllerClassNameSuffix
       // 文件名：应用用户配置的风格 + suffix
       const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
       const fileName = fileBase + (naming.controllerClassNameSuffix
@@ -191,7 +169,7 @@ export class ApiGenerator {
     return (isOpenApi3 || isSwagger2) && doc.info && doc.paths
   }
   private sanitizeName(name: string): string {
-    return String(name).replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, "_")
+    return sanitizeName(name)
   }
   private isOpenApi(doc: any): boolean {
     // swagger 2.0 uses the `swagger` field
@@ -326,59 +304,12 @@ export class ApiGenerator {
         const controllerName = this.sanitizeName(tag)
         if (!controllers.has(controllerName)) controllers.set(controllerName, [])
 
-        // create unique method name similar to generatorV3
-        if (!(globalThis as any)._controllerMethodNames) (globalThis as any)._controllerMethodNames = {}
-        if (!(globalThis as any)._controllerMethodNames[controllerName]) (globalThis as any)._controllerMethodNames[controllerName] = new Set()
-        const usedNames: Set<string> = (globalThis as any)._controllerMethodNames[controllerName]
-
-        const pathParts = (p as string).split("/").filter(Boolean)
-        let partStartIndex = pathParts.length > 0 ? pathParts.length - 1 : -1
-        let partsIndex: number[] = []
-        const isParam = (part: string) => /^\{.+\}$/.test(part)
-        let bySuffix = ""
-
-        while (partStartIndex >= 0) {
-          const part = pathParts[partStartIndex]
-          if (isParam(part)) {
-            partStartIndex--
-            const paramName = part.replace(/[{}]/g, "")
-            if (!bySuffix) {
-              if (!partsIndex.join("").includes("By")) {
-                bySuffix = "By" + paramName.charAt(0).toUpperCase() + paramName.slice(1)
-              } else {
-                bySuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1)
-              }
-            }
-          } else {
-            partsIndex.unshift(partStartIndex)
-            const n_methodName =
-              partsIndex
-                .map((item) => {
-                  const str = pathParts[item] || ""
-                  if (!str) return ""
-                  return str.charAt(0).toUpperCase() + str.slice(1)
-                })
-                .join("") + bySuffix
-            if (usedNames.has(`${controllerName}.${n_methodName}`)) {
-              partStartIndex--
-            } else {
-              partStartIndex = -1
-            }
-          }
-        }
-
-        let methodName = partsIndex
-          .map((item) => {
-            const str = pathParts[item] || ""
-            if (!str) return ""
-            return str.charAt(0).toUpperCase() + str.slice(1)
-          })
-          .join("")
-        methodName = methodName + bySuffix
-        if (!methodName || usedNames.has(`${controllerName}.${methodName}`)) {
-          methodName = this.sanitizeName(op.operationId || this.getOperationId(p as string, method))
-        }
-        usedNames.add(`${controllerName}.${methodName}`)
+        const methodName = buildUniqueMethodName(
+          p as string,
+          controllerName,
+          method,
+          op.operationId
+        )
 
         // params type generation
         const paramsName = `${controllerName}${methodName}Params`
@@ -588,12 +519,6 @@ export class ApiGenerator {
     }
 
     return { controllerClasses, paramTypes, controllers }
-  }
-
-  private getOperationId(path: string, method: string): string {
-    const pathParts = path.split("/").filter(Boolean)
-    const lastPart = pathParts[pathParts.length - 1] || ""
-    return `${method.toLowerCase()}${lastPart.charAt(0).toUpperCase() + lastPart.slice(1)}`
   }
 
   private generateCode(apiDocs: OpenAPIV2.Document) {
