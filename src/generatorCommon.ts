@@ -40,6 +40,20 @@ export function applyFileCasing(s: string, casing: NamingConfig["controllerFileN
   return toPascalCase(s)
 }
 
+export function buildControllerNames(controllerKey: string, naming: NamingConfig): { className: string; fileName: string } {
+  const classBase = naming.controllerFileNameCasing === "default"
+    ? sanitizeName(controllerKey)
+    : toPascalCase(controllerKey)
+  const className = naming.controllerFileNameCasing === "default"
+    ? sanitizeName(classBase + naming.controllerClassNameSuffix)
+    : classBase + naming.controllerClassNameSuffix
+  const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
+  const fileName = fileBase + (naming.controllerClassNameSuffix
+    ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
+    : "")
+  return { className, fileName }
+}
+
 export function getOperationId(path: string, method: string): string {
   const pathParts = path.split("/").filter(Boolean)
   const lastPart = pathParts[pathParts.length - 1] || ""

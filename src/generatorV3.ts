@@ -2,12 +2,11 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV3 } from "openapi-types"
 import {
-  applyFileCasing,
+  buildControllerNames,
   buildUniqueMethodName,
   DEFAULT_NAMING,
   type NamingConfig,
   sanitizeName,
-  toPascalCase,
 } from "./generatorCommon"
 
 export class ApiGenerator {
@@ -127,18 +126,7 @@ export class ApiGenerator {
     // ── 3. 写入各 Controller 文件 ─────────────────────────────────
     const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
     for (const [controllerKey, methods] of controllers) {
-      // 类名：default 时保持 sanitizeName，其它风格使用 PascalCase
-      const classBase = naming.controllerFileNameCasing === "default"
-        ? this.sanitizeName(controllerKey)
-        : toPascalCase(controllerKey)
-      const className = naming.controllerFileNameCasing === "default"
-        ? this.sanitizeName(classBase + naming.controllerClassNameSuffix)
-        : classBase + naming.controllerClassNameSuffix
-      // 文件名：应用用户配置的风格 + suffix
-      const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
-      const fileName = fileBase + (naming.controllerClassNameSuffix
-        ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
-        : "")
+      const { className, fileName } = buildControllerNames(controllerKey, naming)
 
       const description =
         (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
