@@ -122,17 +122,7 @@ export interface XX{
 ## 配置选项
 
 ### VS Code 设置
-```json
-{
-  "generator-ts-api.framework": "react",
-  "generator-ts-api.outputType": "ts",
-  "generator-ts-api.template": "./templates/default.ts",
-  "generator-ts-api.apiDocsUrl": "http://your-api-docs-url",
-  "generator-ts-api.apiDocsPath": "./api-docs.json",
-  "generator-ts-api.exclude": ["**/test/**", "**/*.test.*"],
-  "generator-ts-api.include": ["**/*.ts", "**/*.tsx"]
-}
-```
+[配置项速查](./Releases.md)
 
 ## 开发计划
 
