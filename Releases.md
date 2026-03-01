@@ -2,6 +2,87 @@
 
 ## [Unreleased]
 
+### 新增功能
+
+#### Mock 数据自动生成
+
+新增命令 `generator-ts-api.generateMock`，基于 API 文档的 Schema 和 `example` 字段，一键生成本地 Mock 脚本或 JSON 数据，支持三种输出格式：
+
+| 格式 | 说明 | 输出文件 |
+|---|---|---|
+| `json`（默认） | 纯 JSON 文件，键为 `"METHOD /path"`，值为响应体 Mock 数据 | `mock-data.json` |
+| `msw` | MSW (Mock Service Worker) handlers 文件（TypeScript），可直接用于浏览器端或 Vitest | `handlers.ts` |
+| `json-server` | 生成 `db.json` + `routes.json` + `README.md`，配合 `json-server` 启动本地 Mock 服务 | 目录 |
+
+##### Mock 值生成优先级
+
+每个字段的 Mock 值按如下优先级决定，优先使用文档中已有的示例值：
+
+1. `schema.example`
+2. `schema.examples[*].value`（OpenAPI 3.1 格式）
+3. `schema.default`
+4. 按 `type` + `format` + 字段语义自动合成
+
+##### 按 format 的合成规则（未提供 example 时）
+
+| format | 合成值示例 |
+|---|---|
+| `date-time` | `"2024-01-15T08:30:00Z"` |
+| `date` | `"2024-01-15"` |
+| `email` | `"example@example.com"` |
+| `uuid` | `"550e8400-e29b-41d4-a716-446655440000"` |
+| `uri` / `url` | `"https://example.com"` |
+| `password` | `"********"` |
+| `ipv4` | `"192.168.1.1"` |
+
+##### 字段名语义推断（无 format 时的后备策略）
+
+对于 `string` 类型但无 `format` 的字段，会通过字段名（`title` / `description`）进行语义推断：
+
+| 关键词 | 合成值 |
+|---|---|
+| 含 `email` | `"example@example.com"` |
+| 含 `phone` / `mobile` / `tel` | `"+8613800138000"` |
+| 含 `url` / `link` | `"https://example.com"` |
+| 含 `name` | `"示例名称"` |
+| 含 `token` | JWT 示例字符串 |
+| 含 `address` | `"中国上海市浦东新区"` |
+
+##### 新增配置项
+
+| 配置键 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `mock.outputFormat` | enum | `json` | 输出格式：`json` / `msw` / `json-server` |
+| `mock.baseUrl` | string | `""` | MSW / json-server 模式的 API 基础路径前缀（如 `/api`） |
+| `mock.arrayItemCount` | number | `2` | 数组字段每次生成的示例条目数（1–20） |
+
+##### MSW handlers 输出示例
+
+```typescript
+import { http, HttpResponse } from 'msw'
+
+const BASE_URL = '/api'
+
+export const handlers = [
+  // 获取用户列表
+  http.get(`${BASE_URL}/user/list`, () => {
+    return HttpResponse.json(
+      { list: [{ id: "1", name: "示例名称" }], total: 1 },
+      { status: 200 }
+    )
+  }),
+]
+```
+
+##### 使用步骤
+
+1. 打开命令面板，执行 `生成Mock数据`
+2. 选择 API 文档来源（URL / 本地文件 / 当前配置）
+3. 选择输出文件或目录
+4. 生成完成后可点击 **打开文件** 直接预览
+
+---
+
 ---
 
 ## [0.1.0] - 2026-02-28

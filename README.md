@@ -29,6 +29,12 @@
 - ✅ 自动生成请求方法（按配置切换风格）
 - ✅ 支持自定义模板扩展
 
+### 5) Mock 数据生成
+- ✅ 基于 `example` / `default` 字段优先生成真实 Mock 值
+- ✅ 按 `format`（date-time、email、uuid…）与字段名语义自动合成
+- ✅ 支持三种输出格式：纯 JSON / MSW handlers / json-server
+- ✅ 前后端并行开发，无需等待真实接口上线
+
 ### 3) 类型与结构处理
 - ✅ 常见 OpenAPI 类型推导
 - ✅ 请求/响应结构映射
@@ -59,6 +65,7 @@
 - `generator-ts-api.generate`：按当前配置生成
 - `generator-ts-api.generateFromUrl`：从 URL 拉取并生成
 - `generator-ts-api.generateFromFile`：从本地文件读取并生成
+- `generator-ts-api.generateMock`：生成 Mock 数据（JSON / MSW / json-server）
 
 ### 导出示例
 
@@ -178,7 +185,7 @@ MIT License
 | ^                      | **类型映射规则（Type Map）** | 允许用户将 Swagger 的特殊类型（如 `int64`、`date-time`）映射至自定义的 TS 类型 | 解决长整型精度丢失、时间格式化等业务定制需求                 |
 | ^                      | **输出与拆包策略**           | 支持将接口按 API `Tags` 模块化分组，输出到不同文件夹或单一特定文件 | 应对大型项目上百个 API 导致单文件过大、难以维护的问题        |
 | ^                      | **文档及注释提取**           | 配置是否提取 `summary`、`description` 并转换为标准的 `JSDoc` 注释 | 增强开发时的代码悬浮提示（Hover）体验                        |
-| **核心业务赋能**       | **Mock 数据自动生成**        | 基于 API 类型和 `example` 字段，一键生成本地 Mock 脚本或 JSON 数据 | 在后端接口未完成时，实现前后端无缝并行开发                   |
+| **核心业务赋能**       | **Mock 数据自动生成**        | 基于 API 类型和 `example` 字段，一键生成本地 Mock 脚本或 JSON 数据 | 在后端接口未完成时，实现前后端无缝并行开发                   | ✅ |
 | ^                      | **请求 Hooks 封装生成**      | 除基础请求外，自动生成 React `SWR`/`React-Query` 或 Vue3 `Composables` 代码 | 深度集成主流前端框架，直接去掉大量样板代码                   |
 | ^                      | **远程带鉴权拉取**           | 支持通过配置携带 Header（Token/Cookie）来请求被保护的线上 OpenAPI/Swagger JSON | 能够顺利访问企业内部加锁/需要登录的接口平台                  |
 | ^                      | **自动代码格式化**           | 生成后自动调用当前工作区的 `Prettier` 或 `ESLint` 进行后处理 | 防止生成的代码出现大量 Lint 报错导致 CI 阻塞                 |
@@ -196,6 +203,7 @@ MIT License
 | ------ | ------------------ | ------------------------------------------------------------ | ---------- | ------------------------------ | ------ | ---- | ----------- |
 | 功能   | 文档生成           | 支持3.x版本文档解析                                          | 高         | 手写生成，每次修改都是两套     | P00    | ✅    | ✅           |
 | ^      | ^                  | 支持2.x版本文档解析                                          | ^          | ^                              | P00    | ✅    | ✅           |
+| 功能   | Mock 数据生成      | json / MSW handlers / json-server 三种格式；example 优先，按 format / 字段名语义合成 | 中 | 文档无 example 时合成值需人工校对 | P1 | ✅ | — |
 | 配置   | HTTP 客户端适配    | 支持 axios/fetch/自定义模板三档；可配置 request 导入路径、拦截器注入位 | 中         | 各项目请求封装差异大           | P1     | ✅    | ✅           |
 | 配置   | 类型映射 TypeMap   | 支持 int64→string、date-time→string/Date、binary→Blob；允许覆盖默认映射 | 低-中      | 历史代码类型变更导致编译告警   | P1     | ✅    | ✅           |
 | 配置   | 输出拆分策略       | 单文件 / 按 tag 分文件 / 按模块分目录；可配置文件名规则      | 中         | 导入路径和覆盖策略复杂         | P1     | ✅    | ✅           |

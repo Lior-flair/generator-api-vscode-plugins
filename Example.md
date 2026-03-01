@@ -369,7 +369,177 @@ output/
 
 ---
 
-## 19) 快速排查
+## 20) Mock 数据生成：纯 JSON 格式
+
+适合：快速查看每个接口的响应结构，或作为简单的 fixture 文件。
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "json",
+  "generator-ts-api.mock.arrayItemCount": 2
+}
+```
+
+执行命令 `生成Mock数据` → 选择来源 → 保存为 `mock-data.json`。
+
+生成示例：
+
+```json
+{
+  "GET /user/list": {
+    "status": 200,
+    "summary": "获取用户列表",
+    "data": {
+      "list": [
+        { "id": "1", "name": "示例名称", "createdAt": "2024-01-15T08:30:00Z" },
+        { "id": "1", "name": "示例名称", "createdAt": "2024-01-15T08:30:00Z" }
+      ],
+      "total": 50
+    }
+  },
+  "POST /user": {
+    "status": 200,
+    "summary": "创建用户",
+    "data": { "id": "1" }
+  }
+}
+```
+
+---
+
+## 21) Mock 数据生成：MSW (Mock Service Worker)
+
+适合：React / Vue 项目前后端并行开发，搭配 Vitest 或浏览器偏移模拟请求。
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "msw",
+  "generator-ts-api.mock.baseUrl": "/api",
+  "generator-ts-api.mock.arrayItemCount": 3
+}
+```
+
+执行命令 `生成Mock数据` → 保存为 `handlers.ts`，生成内容示例：
+
+```typescript
+import { http, HttpResponse } from 'msw'
+
+const BASE_URL = '/api'
+
+export const handlers = [
+  // 获取用户列表
+  http.get(`${BASE_URL}/user/list`, () => {
+    return HttpResponse.json(
+      {
+        "list": [
+          { "id": "1", "name": "示例名称", "email": "example@example.com" },
+          { "id": "1", "name": "示例名称", "email": "example@example.com" },
+          { "id": "1", "name": "示例名称", "email": "example@example.com" }
+        ],
+        "total": 50
+      },
+      { status: 200 }
+    )
+  }),
+]
+```
+
+在项目入口注册：
+
+```typescript
+// src/mocks/browser.ts（浏览器端）
+import { setupWorker } from 'msw/browser'
+import { handlers } from './handlers'
+export const worker = setupWorker(...handlers)
+
+// vitest.setup.ts（测试端）
+import { setupServer } from 'msw/node'
+import { handlers } from './mock/handlers'
+export const server = setupServer(...handlers)
+```
+
+---
+
+## 22) Mock 数据生成：json-server
+
+适合：无需修改前端代码、快速起一个本地 REST Mock 服务。
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "json-server",
+  "generator-ts-api.mock.arrayItemCount": 5
+}
+```
+
+执行命令 `生成Mock数据` → 选择输出**目录**，生成：
+
+```text
+mock/
+  db.json        ← 资源数据
+  routes.json    ← 路由映射
+  README.md      ← 使用说明
+```
+
+一键启动：
+
+```bash
+npm install -g json-server
+json-server --watch mock/db.json --routes mock/routes.json --port 3100
+```
+
+访问 `http://localhost:3100/user` 即可获取 Mock 数据。
+
+---
+
+## 23) Mock 数据生成：使用配置中的 URL/路径
+
+适合：已在设置中配置了 `apiDocsUrl` 或 `apiDocsPath`，一键生成无需重复输入。
+
+```jsonc
+{
+  "generator-ts-api.apiDocsUrl": "http://localhost:8080/v3/api-docs",
+  "generator-ts-api.mock.outputFormat": "json",
+  "generator-ts-api.mock.arrayItemCount": 2
+}
+```
+
+执行命令 `生成Mock数据` → 选择 **使用配置中的 URL/路径** → 直接生成。
+
+---
+
+## 24) 常见 Mock 组合模板
+
+### A. 新项目 + MSW + 覆盖 baseUrl
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "msw",
+  "generator-ts-api.mock.baseUrl": "https://api.example.com",
+  "generator-ts-api.mock.arrayItemCount": 2
+}
+```
+
+### B. 快速验证接口结构（纯 JSON）
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "json",
+  "generator-ts-api.mock.arrayItemCount": 1
+}
+```
+
+### C. 离线演示环境（json-server）
+
+```jsonc
+{
+  "generator-ts-api.mock.outputFormat": "json-server",
+  "generator-ts-api.mock.arrayItemCount": 10
+}
+```
+
+---
+
+## 25) 快速排查
 
 - 生成类型不符合预期：检查 `compatibilityVersion` 与 `typeMapping.formatMap`。
 - 还是旧导入风格：检查 `httpClient` 是否仍是 `axios-wrapper`。
