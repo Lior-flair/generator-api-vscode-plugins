@@ -133,6 +133,18 @@
   // 是否生成 request.ts 拦截器样板（不覆盖已有文件）
   "generator-ts-api.generateRequestScaffold": false,
 
+  // 生成结果兼容目标版本：latest | 0.0.x
+  "generator-ts-api.compatibilityVersion": "latest",
+
+  // date-time 映射目标：string | Date
+  "generator-ts-api.typeMapping.dateTimeTarget": "string",
+
+  // 自定义 format -> TS 类型映射（会覆盖默认映射）
+  "generator-ts-api.typeMapping.formatMap": {
+    "int64": "string",
+    "binary": "Blob"
+  },
+
   // 自定义模板文件路径（custom 模式，优先于 templateString）
   "generator-ts-api.customTemplate.templateFile": "",
 
@@ -146,6 +158,7 @@
 ### 技术变更
 
 - `generatorCommon.ts` 新增 `HttpClientMode` 类型、`HttpClientConfig` 接口、`DEFAULT_HTTP_CLIENT_CONFIG` 常量
+- `generatorCommon.ts` 新增格式映射与兼容策略：默认 `int64 -> string`、`date-time -> string`、`binary -> Blob`，支持 `formatMap` 覆盖与 `0.0.x` 回退兼容
 - `generatorCommon.ts` 新增 `buildImportSnippet(cfg)` — 生成文件顶部 import 代码段
 - `generatorCommon.ts` 新增 `buildMethodBody(cfg, ...)` — 生成 API 方法体
 - `generatorCommon.ts` 新增 `generateRequestScaffoldFile(outputDir, cfg, ext)` — 写入 request.ts 样板

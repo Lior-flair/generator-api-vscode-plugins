@@ -135,6 +135,36 @@
           "default": false,
           "description": "是否在输出目录生成 request.ts 样板文件（含拦截器占位注释）。文件已存在时不覆盖"
         },
+        "generator-ts-api.compatibilityVersion": {
+          "type": "string",
+          "enum": [
+            "latest",
+            "0.0.x"
+          ],
+          "default": "latest",
+          "enumDescriptions": [
+            "使用当前版本默认映射：int64 -> string, date-time -> string, binary -> Blob",
+            "兼容 0.0.x 输出行为：int64 -> number, date-time -> string, binary -> string"
+          ],
+          "description": "生成结果兼容目标版本"
+        },
+        "generator-ts-api.typeMapping.dateTimeTarget": {
+          "type": "string",
+          "enum": [
+            "string",
+            "Date"
+          ],
+          "default": "string",
+          "description": "date-time 的目标类型（默认 string，可切换 Date）"
+        },
+        "generator-ts-api.typeMapping.formatMap": {
+          "type": "object",
+          "default": {},
+          "description": "自定义格式映射（覆盖默认映射），例如 {\"int64\":\"bigint\",\"binary\":\"Blob\" }",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "generator-ts-api.customTemplate.templateFile": {
           "type": "string",
           "default": "",

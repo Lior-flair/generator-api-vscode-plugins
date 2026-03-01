@@ -77,6 +77,24 @@ export function getControllerMethodNameSet(controllerName: string): Set<string> 
 /** 支持的 HTTP 客户端模式 */
 export type HttpClientMode = "axios" | "axios-wrapper" | "fetch" | "custom"
 
+/** 生成结果兼容目标版本 */
+export type CompatibilityVersion = "latest" | "0.0.x"
+
+/** OpenAPI/Swagger 标量格式映射 */
+export type FormatTypeMappings = Record<string, string>
+
+const DEFAULT_FORMAT_TYPE_MAPPINGS: FormatTypeMappings = {
+  int64: "string",
+  "date-time": "string",
+  binary: "Blob",
+}
+
+const LEGACY_0_0_X_FORMAT_TYPE_MAPPINGS: FormatTypeMappings = {
+  int64: "number",
+  "date-time": "string",
+  binary: "string",
+}
+
 export interface HttpClientConfig {
   /** 客户端模式 */
   mode: HttpClientMode
@@ -88,12 +106,52 @@ export interface HttpClientConfig {
   customTemplateFile?: string
   /** 自定义内联模板字符串；占位符：{{method}} {{METHOD}} {{url}} {{params}} {{body}} {{returnType}} {{methodName}} {{contentType}} */
   customTemplateString?: string
+  /** 生成结果兼容目标版本（latest 默认；0.0.x 兼容旧版类型行为） */
+  compatibilityVersion?: CompatibilityVersion
+  /** 额外格式映射（会覆盖默认映射），例如：{ "date-time": "Date" } */
+  formatTypeMappings?: FormatTypeMappings
 }
 
 export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
   mode: "axios-wrapper",
   requestImportPath: "@/utils/request",
   generateRequestScaffold: false,
+  compatibilityVersion: "latest",
+  formatTypeMappings: {},
+}
+
+export function resolveFormatTypeMappings(cfg: HttpClientConfig): FormatTypeMappings {
+  const compatibilityVersion = cfg.compatibilityVersion || "latest"
+  const base = compatibilityVersion === "0.0.x"
+    ? LEGACY_0_0_X_FORMAT_TYPE_MAPPINGS
+    : DEFAULT_FORMAT_TYPE_MAPPINGS
+  return {
+    ...base,
+    ...(cfg.formatTypeMappings || {}),
+  }
+}
+
+/**
+ * 根据 schema.type + schema.format 查找可映射的 TypeScript 类型。
+ * 返回 undefined 表示未命中映射，应按原有逻辑继续推断。
+ */
+export function resolveMappedScalarType(
+  cfg: HttpClientConfig,
+  schemaType?: string | string[],
+  schemaFormat?: string | string[]
+): string | undefined {
+  const normalizedType = Array.isArray(schemaType) ? schemaType[0] : schemaType
+  const normalizedFormat = Array.isArray(schemaFormat) ? schemaFormat[0] : schemaFormat
+  if (!normalizedFormat) return undefined
+  const mappings = resolveFormatTypeMappings(cfg)
+  const mapped = mappings[String(normalizedFormat).toLowerCase()]
+  if (!mapped) return undefined
+
+  // 若显式声明 type 且明显不属于标量，避免误映射
+  if (normalizedType && ["array", "object"].includes(normalizedType)) {
+    return undefined
+  }
+  return mapped
 }
 
 /**

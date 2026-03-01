@@ -399,6 +399,142 @@ async function testScaffold() {
   checkIncludes(scaffoldContent, "export default requestClass", "样板文件导出 requestClass")
 }
 
+// ─── 测试 TypeMapping（latest + 覆盖 + 0.0.x 兼容）──────────────────────────
+
+async function testTypeMappings() {
+  console.log("\n[TypeMapping - latest / override / 0.0.x]")
+
+  const v3MapDoc = {
+    openapi: "3.0.0",
+    info: { title: "TypeMap API", version: "1.0" },
+    tags: [{ name: "TypeMapApi", description: "类型映射" }],
+    paths: {
+      "/type-map": {
+        get: {
+          tags: ["TypeMapApi"],
+          responses: {
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/TypeMappingModel" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    components: {
+      schemas: {
+        TypeMappingModel: {
+          type: "object",
+          properties: {
+            id64: { type: "integer", format: "int64" },
+            createdAt: { type: "string", format: "date-time" },
+            file: { type: "string", format: "binary" },
+          },
+        },
+      },
+    },
+  }
+
+  const v2MapDoc = {
+    swagger: "2.0",
+    info: { title: "TypeMap API", version: "1.0" },
+    tags: [{ name: "TypeMapApi", description: "类型映射" }],
+    paths: {
+      "/type-map": {
+        get: {
+          tags: ["TypeMapApi"],
+          responses: {
+            200: {
+              schema: { $ref: "#/definitions/TypeMappingModel" },
+            },
+          },
+        },
+      },
+    },
+    definitions: {
+      TypeMappingModel: {
+        type: "object",
+        properties: {
+          id64: { type: "integer", format: "int64" },
+          createdAt: { type: "string", format: "date-time" },
+          file: { type: "string", format: "binary" },
+        },
+      },
+    },
+  }
+
+  const v3 = new ApiGeneratorV3()
+  const v2 = new ApiGeneratorV2()
+
+  const v3LatestFile = path.join(tmpDir, "v3-typemap-latest.ts")
+  await v3.generate(v3MapDoc, "vue", "ts", v3LatestFile, "single", undefined, {
+    mode: "fetch",
+    requestImportPath: "",
+    generateRequestScaffold: false,
+    compatibilityVersion: "latest",
+  })
+  const v3Latest = fs.readFileSync(v3LatestFile, "utf-8")
+  checkIncludes(v3Latest, "id64?: string;", "V3 latest: int64 -> string")
+  checkIncludes(v3Latest, "createdAt?: string;", "V3 latest: date-time -> string")
+  checkIncludes(v3Latest, "file?: Blob;", "V3 latest: binary -> Blob")
+
+  const v3OverrideFile = path.join(tmpDir, "v3-typemap-override.ts")
+  await v3.generate(v3MapDoc, "vue", "ts", v3OverrideFile, "single", undefined, {
+    mode: "fetch",
+    requestImportPath: "",
+    generateRequestScaffold: false,
+    compatibilityVersion: "latest",
+    formatTypeMappings: {
+      int64: "bigint",
+      "date-time": "Date",
+      binary: "ArrayBuffer",
+    },
+  })
+  const v3Override = fs.readFileSync(v3OverrideFile, "utf-8")
+  checkIncludes(v3Override, "id64?: bigint;", "V3 override: int64 -> bigint")
+  checkIncludes(v3Override, "createdAt?: Date;", "V3 override: date-time -> Date")
+  checkIncludes(v3Override, "file?: ArrayBuffer;", "V3 override: binary -> ArrayBuffer")
+
+  const v3LegacyFile = path.join(tmpDir, "v3-typemap-legacy.ts")
+  await v3.generate(v3MapDoc, "vue", "ts", v3LegacyFile, "single", undefined, {
+    mode: "fetch",
+    requestImportPath: "",
+    generateRequestScaffold: false,
+    compatibilityVersion: "0.0.x",
+  })
+  const v3Legacy = fs.readFileSync(v3LegacyFile, "utf-8")
+  checkIncludes(v3Legacy, "id64?: number;", "V3 0.0.x: int64 -> number")
+  checkIncludes(v3Legacy, "createdAt?: string;", "V3 0.0.x: date-time -> string")
+  checkIncludes(v3Legacy, "file?: string;", "V3 0.0.x: binary -> string")
+
+  const v2LatestFile = path.join(tmpDir, "v2-typemap-latest.ts")
+  await v2.generate(v2MapDoc, "vue", "ts", v2LatestFile, "single", undefined, {
+    mode: "axios-wrapper",
+    requestImportPath: "@/utils/request",
+    generateRequestScaffold: false,
+    compatibilityVersion: "latest",
+  })
+  const v2Latest = fs.readFileSync(v2LatestFile, "utf-8")
+  checkIncludes(v2Latest, "id64?: string;", "V2 latest: int64 -> string")
+  checkIncludes(v2Latest, "createdAt?: string;", "V2 latest: date-time -> string")
+  checkIncludes(v2Latest, "file?: Blob;", "V2 latest: binary -> Blob")
+
+  const v2LegacyFile = path.join(tmpDir, "v2-typemap-legacy.ts")
+  await v2.generate(v2MapDoc, "vue", "ts", v2LegacyFile, "single", undefined, {
+    mode: "axios-wrapper",
+    requestImportPath: "@/utils/request",
+    generateRequestScaffold: false,
+    compatibilityVersion: "0.0.x",
+  })
+  const v2Legacy = fs.readFileSync(v2LegacyFile, "utf-8")
+  checkIncludes(v2Legacy, "id64?: number;", "V2 0.0.x: int64 -> number")
+  checkIncludes(v2Legacy, "createdAt?: string;", "V2 0.0.x: date-time -> string")
+  checkIncludes(v2Legacy, "file?: string;", "V2 0.0.x: binary -> string")
+}
+
 // ─── 主流程 ───────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -414,6 +550,7 @@ async function main() {
     await testV3ByTag()
     await testV3NoTags()
     await testScaffold()
+    await testTypeMappings()
   } catch (e) {
     console.error("\n[FATAL] 测试运行异常:", e)
     failed++

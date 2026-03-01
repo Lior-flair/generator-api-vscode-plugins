@@ -10,6 +10,7 @@ import {
   DEFAULT_NAMING,
   type HttpClientConfig,
   type NamingConfig,
+  resolveMappedScalarType,
   sanitizeName,
 } from "./generatorCommon"
 
@@ -151,6 +152,13 @@ export class ApiGenerator {
   private sanitizeName(name: string): string {
     return sanitizeName(name)
   }
+
+  private normalizeFormat(format: unknown): string | undefined {
+    if (typeof format === "string") return format
+    if (Array.isArray(format) && typeof format[0] === "string") return format[0]
+    return undefined
+  }
+
   private isOpenApi(doc: any): boolean {
     // swagger 2.0 uses the `swagger` field
     return doc.swagger && doc.swagger.startsWith("2.")
@@ -182,9 +190,15 @@ export class ApiGenerator {
     }
     if (p.type === "string") {
       if ((p as any).enum) return (p as any).enum.map((v: string) => `'${v}'`).join(" | ")
+      const mapped = resolveMappedScalarType(this.httpClientConfig, p.type, this.normalizeFormat((p as any).format))
+      if (mapped) return mapped
       return "string"
     }
-    if (p.type === "number" || p.type === "integer") return "number"
+    if (p.type === "number" || p.type === "integer") {
+      const mapped = resolveMappedScalarType(this.httpClientConfig, p.type, this.normalizeFormat((p as any).format))
+      if (mapped) return mapped
+      return "number"
+    }
     if (p.type === "boolean") return "boolean"
     if (p.type === "file") return "File"
     return "any"
@@ -201,6 +215,10 @@ export class ApiGenerator {
         } else {
           type = `T`
         }
+      }
+      const mapped = resolveMappedScalarType(this.httpClientConfig, p.type, this.normalizeFormat((p as any).format))
+      if (mapped) {
+        return mapped
       }
       if (p.type === "number" || p.type === "integer") {
         return "number"

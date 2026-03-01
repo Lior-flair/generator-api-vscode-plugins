@@ -6,6 +6,8 @@ import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
 import {
+  type CompatibilityVersion,
+  type FormatTypeMappings,
   generateRequestScaffoldFile,
   type HttpClientConfig,
   type HttpClientMode,
@@ -23,6 +25,18 @@ let urlHistory: string[] = [
 /** 从 VS Code 配置构建 HttpClientConfig，自动填充各档默认 import 路径 */
 function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClientConfig {
   const mode = ((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
+  const compatibilityVersion = ((config.get("compatibilityVersion") as string) || "latest") as CompatibilityVersion
+  const dateTimeTarget = ((config.get("typeMapping.dateTimeTarget") as string) || "string").trim()
+  const customFormatMapRaw = (config.get("typeMapping.formatMap") as Record<string, unknown>) || {}
+  const formatTypeMappings: FormatTypeMappings = {}
+  if (dateTimeTarget) {
+    formatTypeMappings["date-time"] = dateTimeTarget
+  }
+  for (const [key, value] of Object.entries(customFormatMapRaw)) {
+    if (typeof value === "string" && key.trim()) {
+      formatTypeMappings[key.trim().toLowerCase()] = value
+    }
+  }
   let requestImportPath = (config.get("requestImportPath") as string) || ""
   if (!requestImportPath) {
     switch (mode) {
@@ -37,6 +51,8 @@ function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClien
     generateRequestScaffold: (config.get("generateRequestScaffold") as boolean) || false,
     customTemplateFile: (config.get("customTemplate.templateFile") as string) || undefined,
     customTemplateString: (config.get("customTemplate.templateString") as string) || undefined,
+    compatibilityVersion,
+    formatTypeMappings,
   }
 }
 

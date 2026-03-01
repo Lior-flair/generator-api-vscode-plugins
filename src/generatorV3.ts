@@ -10,6 +10,7 @@ import {
   DEFAULT_NAMING,
   type HttpClientConfig,
   type NamingConfig,
+  resolveMappedScalarType,
   sanitizeName,
 } from "./generatorCommon"
 
@@ -546,9 +547,13 @@ ${methods.join("\n\n")}
       if (schema.enum) {
         return schema.enum.map((v: string) => `'${v}'`).join(" | ")
       }
+      const mapped = resolveMappedScalarType(this.httpClientConfig, schema.type, schema.format)
+      if (mapped) return mapped
       return "string"
     }
     if (schema.type === "number" || schema.type === "integer") {
+      const mapped = resolveMappedScalarType(this.httpClientConfig, schema.type, schema.format)
+      if (mapped) return mapped
       return "number"
     }
     if (schema.type === "boolean") {
