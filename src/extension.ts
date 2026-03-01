@@ -5,6 +5,7 @@ import * as vscode from "vscode"
 import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
+import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
 import {
   type CompatibilityVersion,
   type FormatTypeMappings,
@@ -424,10 +425,143 @@ export function activate(context: vscode.ExtensionContext) {
     }
   )
 
+  // ─── generateMock 命令 ────────────────────────────────────────────────────
+  const generateMockCommand = vscode.commands.registerCommand(
+    "generator-ts-api.generateMock",
+    async () => {
+      const config = vscode.workspace.getConfiguration("generator-ts-api")
+      const mockFormat = ((config.get("mock.outputFormat") as string) || "json") as MockOutputFormat
+      const mockBaseUrl = (config.get("mock.baseUrl") as string) || ""
+      const mockArrayItemCount = (config.get("mock.arrayItemCount") as number) || 2
+
+      // 步骤 1：选择 API 文档来源
+      const sourceChoice = await vscode.window.showQuickPick(
+        [
+          { label: "$(globe) 从 URL 拉取", value: "url" },
+          { label: "$(file) 从本地文件", value: "file" },
+          { label: "$(settings-gear) 使用配置中的 URL/路径", value: "config" },
+        ],
+        { title: "生成 Mock 数据 — 选择 API 文档来源", placeHolder: "选择数据源" }
+      )
+      if (!sourceChoice) return
+
+      let loading: vscode.StatusBarItem | undefined
+      try {
+        let apiDocs: any
+
+        if (sourceChoice.value === "url") {
+          const quickPick = vscode.window.createQuickPick()
+          quickPick.placeholder = "输入新的URL或选择历史记录"
+          quickPick.items = [
+            { label: "输入新URL", description: "手动输入API文档URL" },
+            ...urlHistory.map((url) => ({ label: url, description: "历史记录" })),
+          ]
+          const url = await new Promise<string | undefined>((resolve) => {
+            quickPick.onDidAccept(() => {
+              const sel = quickPick.selectedItems[0]
+              if (sel?.label === "输入新URL") {
+                vscode.window.showInputBox({ prompt: "请输入API文档URL", placeHolder: "https://example.com/api-docs", ignoreFocusOut: true }).then(resolve)
+              } else {
+                resolve(sel?.label)
+              }
+              quickPick.hide()
+            })
+            quickPick.onDidHide(() => resolve(undefined))
+            quickPick.show()
+          })
+          if (!url) return
+          loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+          loading.text = "$(sync~spin) 拉取 API 文档..."
+          loading.show()
+          apiDocs = await apiParser.parseFromUrl(url)
+        } else if (sourceChoice.value === "file") {
+          const fileUri = await vscode.window.showOpenDialog({
+            title: "选择API文档文件",
+            filters: { API文档: ["json", "yaml", "yml"] },
+          })
+          if (!fileUri?.[0]) return
+          loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+          loading.text = "$(sync~spin) 解析 API 文档..."
+          loading.show()
+          apiDocs = await apiParser.parseFromFile(fileUri[0].fsPath)
+        } else {
+          // config
+          const apiDocsUrl = config.get("apiDocsUrl") as string
+          const apiDocsPath = config.get("apiDocsPath") as string
+          if (!apiDocsUrl && !apiDocsPath) {
+            vscode.window.showErrorMessage("请先在设置中配置 generator-ts-api.apiDocsUrl 或 apiDocsPath")
+            return
+          }
+          loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+          loading.text = "$(sync~spin) 拉取 API 文档..."
+          loading.show()
+          apiDocs = apiDocsUrl
+            ? await apiParser.parseFromUrl(apiDocsUrl)
+            : await apiParser.parseFromFile(apiDocsPath)
+        }
+
+        if (loading) {
+          loading.text = "$(sync~spin) 生成 Mock 数据..."
+        }
+
+        // 步骤 2：选择输出位置
+        let outputFsPath: string | undefined
+        if (mockFormat === "json-server") {
+          const folderUri = await vscode.window.showOpenDialog({
+            title: "选择 json-server Mock 输出目录",
+            canSelectFolders: true,
+            canSelectFiles: false,
+            canSelectMany: false,
+            openLabel: "选择输出目录",
+          })
+          outputFsPath = folderUri?.[0]?.fsPath
+        } else {
+          const ext = mockFormat === "msw" ? "ts" : "json"
+          const defaultName = mockFormat === "msw" ? "handlers" : "mock-data"
+          const saveUri = await vscode.window.showSaveDialog({
+            title: "保存 Mock 文件",
+            defaultUri: vscode.Uri.file(`${defaultName}.${ext}`),
+            filters: mockFormat === "msw"
+              ? { TypeScript: ["ts"] }
+              : { JSON: ["json"] },
+          })
+          outputFsPath = saveUri?.fsPath
+        }
+        if (!outputFsPath) return
+
+        // 步骤 3：生成
+        const mockGenerator = new MockGenerator({
+          format: mockFormat,
+          baseUrl: mockBaseUrl,
+          arrayItemCount: mockArrayItemCount,
+        })
+        await mockGenerator.generate(apiDocs, outputFsPath)
+
+        const openAction = "打开文件"
+        const msg = await vscode.window.showInformationMessage(
+          `Mock 数据生成成功！格式: ${mockFormat}`,
+          openAction
+        )
+        if (msg === openAction) {
+          const targetFile = mockFormat === "json-server"
+            ? vscode.Uri.file(path.join(outputFsPath, "db.json"))
+            : vscode.Uri.file(outputFsPath)
+          vscode.window.showTextDocument(targetFile)
+        }
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : "未知错误"
+        vscode.window.showErrorMessage(`生成 Mock 数据失败: ${errorMessage}`)
+      } finally {
+        try { loading?.hide(); loading?.dispose() } catch (_) { /* ignore */ }
+      }
+    }
+  )
+
   context.subscriptions.push(
     generateCommand,
     generateFromUrlCommand,
-    generateFromFileCommand
+    generateFromFileCommand,
+    generateMockCommand
   )
 }
 

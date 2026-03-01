@@ -29,6 +29,10 @@
       {
         "command": "generator-ts-api.generateFromFile",
         "title": "从文件生成api文档"
+      },
+      {
+        "command": "generator-ts-api.generateMock",
+        "title": "生成Mock数据"
       }
     ],
     "configuration": {
@@ -174,6 +178,29 @@
           "type": "string",
           "default": "",
           "description": "自定义内联模板字符串（templateFile 为空时使用）。占位符同上"
+        },
+        "generator-ts-api.mock.outputFormat": {
+          "type": "string",
+          "enum": ["json", "msw", "json-server"],
+          "default": "json",
+          "enumDescriptions": [
+            "纯 JSON 文件，键为 \"METHOD /path\"，值为响应体 Mock 数据",
+            "MSW (Mock Service Worker) handlers 文件（TypeScript），适合浏览器 / Vitest 使用",
+            "json-server 格式：生成 db.json + routes.json，可直接用 json-server 启动本地 Mock 服务"
+          ],
+          "description": "Mock 数据输出格式"
+        },
+        "generator-ts-api.mock.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "MSW / json-server 模式下的 API 基础路径前缀，例如 /api 或 https://example.com/api"
+        },
+        "generator-ts-api.mock.arrayItemCount": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "数组字段每次生成的示例条目数（默认 2）"
         }
       }
     }
