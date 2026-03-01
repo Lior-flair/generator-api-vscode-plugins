@@ -93,20 +93,10 @@ export class ApiGenerator {
 
     // ── 1. 收集类型定义 → {typesDirName}/index.{ext} ──────────────
     const types: string[] = []
-    if (this.isOpenApi3(apiDocs)) {
-      if (apiDocs.components?.schemas) {
-        for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
-          if (this.isSchemaObject(schema) && (schema as any).type === "object") {
-            types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
-          }
-        }
-      }
-    } else {
-      if (apiDocs.definitions) {
-        for (const [name, schema] of Object.entries(apiDocs.definitions)) {
-          if (this.isSchemaObject(schema) && (schema as any).type === "object") {
-            types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
-          }
+    if (apiDocs.components?.schemas) {
+      for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
+        if (this.isSchemaObject(schema) && (schema as any).type === "object") {
+          types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
         }
       }
     }
@@ -159,9 +149,7 @@ export class ApiGenerator {
   }
 
   private isValidApiDoc(doc: any): boolean {
-    const isOpenApi3 = doc.openapi && doc.openapi.startsWith("3.")
-    const isSwagger2 = doc.swagger && doc.swagger.startsWith("2.")
-    return (isOpenApi3 || isSwagger2) && doc.info && doc.paths
+    return doc.openapi && doc.openapi.startsWith("3.") && doc.info && doc.paths
   }
 
   private generateCode(
@@ -173,34 +161,17 @@ export class ApiGenerator {
     const controllers: Map<string, string[]> = new Map()
 
     // 生成类型定义
-    if (this.isOpenApi3(apiDocs)) {
-      // OpenAPI 3.x 类型定义
-      if (apiDocs.components && apiDocs.components.schemas) {
-        for (const [name, schema] of Object.entries(
-          apiDocs.components.schemas
-        )) {
-          if (this.isSchemaObject(schema) && schema.type === "object") {
-            const typeDef = this.generateTypeDefinition(
-              this.sanitizeName(name),
-              schema,
-              apiDocs
-            )
-            types.push(typeDef)
-          }
-        }
-      }
-    } else {
-      // Swagger 2.x 类型定义
-      if (apiDocs.definitions) {
-        for (const [name, schema] of Object.entries(apiDocs.definitions)) {
-          if (this.isSchemaObject(schema) && schema.type === "object") {
-            const typeDef = this.generateTypeDefinition(
-              this.sanitizeName(name),
-              schema,
-              apiDocs
-            )
-            types.push(typeDef)
-          }
+    if (apiDocs.components?.schemas) {
+      for (const [name, schema] of Object.entries(
+        apiDocs.components.schemas
+      )) {
+        if (this.isSchemaObject(schema) && schema.type === "object") {
+          const typeDef = this.generateTypeDefinition(
+            this.sanitizeName(name),
+            schema,
+            apiDocs
+          )
+          types.push(typeDef)
         }
       }
     }
@@ -231,7 +202,7 @@ export class ApiGenerator {
     const controllerClasses: string[] = []
     for (const [controllerName, methods] of controllers) {
       const description =
-        apiDocs.tags.find((tag: any) => tag.name === controllerName)
+        (apiDocs.tags || []).find((tag: any) => tag.name === controllerName)
           ?.description || ""
       const controllerClass = `
 /**
@@ -252,10 +223,6 @@ ${methods.join("\n\n")}
       `// Controller类\n${controllerClasses.join("\n\n")}\n`
 
     return code
-  }
-
-  private isOpenApi3(doc: any): boolean {
-    return doc.openapi && doc.openapi.startsWith("3.")
   }
 
   private isSchemaObject(schema: any): schema is OpenAPIV3.SchemaObject {
@@ -421,24 +388,6 @@ ${methods.join("\n\n")}
     })
 
     return securityConfigs.join("\n      ")
-  }
-
-  private getResponseContentType(operation: any): string {
-    if (operation.responses) {
-      const successResponse = operation.responses["200"]
-      if (successResponse && successResponse.content) {
-        // 优先使用 application/json
-        if (successResponse.content["application/json"]) {
-          return "application/json"
-        }
-        // 检查其他内容类型
-        const contentType = Object.keys(successResponse.content)[0]
-        if (contentType) {
-          return contentType
-        }
-      }
-    }
-    return "application/json"
   }
 
   private getParamsType(operation: any): string {

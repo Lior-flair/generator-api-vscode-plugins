@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { OpenAPIV3 } from 'openapi-types';
 
 export class ApiParser {
   async parseFromUrl(url: string): Promise<any> {

@@ -1,7 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV2 } from "openapi-types"
-import { SchemaObject } from "openapi-typescript"
 import {
   buildControllerNames,
   buildImportSnippet,
@@ -35,19 +34,6 @@ export class ApiGenerator {
   /** 当前生成任务的 HTTP 客户端配置 */
   private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
 
-  private initializeTypeNames(apiDocs: any): void {
-    // if (apiDocs.components?.schemas) {
-    //   Object.keys(apiDocs.components.schemas).forEach((name) => {
-    //     this.typeNames.push(this.sanitizeName(name))
-    //   })
-    // }
-    // if (apiDocs.definitions) {
-    //   Object.keys(apiDocs.definitions).forEach((name) => {
-    //     this.typeNames.push(this.sanitizeName(name))
-    //   })
-    // }
-  }
-
   async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG): Promise<void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
@@ -55,7 +41,6 @@ export class ApiGenerator {
       }
 
       this.httpClientConfig = httpClientConfig
-      this.initializeTypeNames(apiDocs)
 
       if (outputSplit === "byTag") {
         // 按 Tag 拆分多文件输出
