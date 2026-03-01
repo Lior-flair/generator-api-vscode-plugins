@@ -6,42 +6,37 @@
 
 ## 前置要求
 
-### 后端 API 文档源
-- ✅Swagger/OpenAPI 文档链接
-- ✅JSON 格式的 API 文档
-- YAML 格式的 API 文档
-- 其他符合 OpenAPI 规范的文档
+### API 文档来源
+- ✅ Swagger / OpenAPI 在线文档链接
+- ✅ 本地 JSON 文档文件
+- ✅ 本地 YAML 文档文件
+- ✅ 其他符合 OpenAPI 规范的文档
 
-### 支持的文档格式
-- ✅Swagger UI 链接
-- ✅OpenAPI 3.0 规范文档
-- ✅JSON Schema
-- YAML 格式的 API 定义
+### 支持的规范
+- ✅ Swagger 2.x
+- ✅ OpenAPI 3.x
+- ✅ JSON Schema（常见结构）
 
 ## 主要功能
 
-### 1. 多框架支持
-- ✅TypeScript API文档生成
-- React组件文档生成
-- Vue组件文档生成
-- Angular组件文档生成
+### 1) 多框架支持
+- ✅ TypeScript API 代码生成
+- ✅ React / Vue / Angular 项目可直接接入
 
-### 2. 文档生成功能
-- ✅自动解析后端 API 文档
-- ✅自动生成接口定义
-- ✅自动生成请求/响应类型
-- ✅自动生成 API 调用方法
-- 支持自定义文档模板
+### 2) 文档生成能力
+- ✅ 自动解析 API 文档（URL / 文件）
+- ✅ 自动生成接口定义与请求参数类型
+- ✅ 自动生成请求方法（按配置切换风格）
+- ✅ 支持自定义模板扩展
 
-### 3. 代码分析功能
-- ✅API 文档解析
-- 类型推导
-- 参数验证
-- 错误处理生成
+### 3) 类型与结构处理
+- ✅ 常见 OpenAPI 类型推导
+- ✅ 请求/响应结构映射
+- ✅ 错误信息透出，便于排查
 
-### 4. 文档输出格式
-- ✅TypeScript (.ts) 格式
-- JavaScript (.js) 格式
+### 4) 输出格式
+- ✅ TypeScript（`.ts`）
+- ✅ JavaScript（`.js`）
 
 ## 安装方式
 
@@ -52,83 +47,83 @@
 
 ## 使用方法
 
-### 基本使用
-1. 在 VS Code 中打开项目
-2. 使用命令面板 (Ctrl+Shift+P 或 Cmd+Shift+P)
-3. 输入 "Generate API Documentation"
-4. 选择后端 API 文档源（URL 或文件路径）
-5. 选择目标框架
-6. 选择输出目录
+### 快速开始
+1. 在 VS Code 中打开你的前端项目。
+2. 打开命令面板（Windows/Linux：`Ctrl + Shift + P`，macOS：`Cmd + Shift + P`）。
+3. 执行对应命令（URL / File）。
+4. 选择 API 文档来源。
+5. 选择输出文件或输出目录。
+6. 完成生成并在项目中引用。
 
 ### 命令列表
-- `generator-ts-api.generate`: 生成API文档
-- `generator-ts-api.generateFromUrl`: 从URL生成API文档
-- `generator-ts-api.generateFromFile`: 从文件生成API文档
+- `generator-ts-api.generate`：按当前配置生成
+- `generator-ts-api.generateFromUrl`：从 URL 拉取并生成
+- `generator-ts-api.generateFromFile`：从本地文件读取并生成
 
-### 导出效果
+### 导出示例
+
+#### request.ts（axios-wrapper 示例）
 ```typescript
+import axios, { type AxiosRequestConfig } from "axios"
+
 export const getConfigs = (
-  method: Method,
+  method: string,
   contentType: string,
   url: string,
-  options: AxiosRequestConfig
+  options: AxiosRequestConfig = {}
 ): AxiosRequestConfig => {
-  const configs: AxiosRequestConfig = { ...options, method, url }
-  configs.headers = {
-    ...options.headers,
-    "Content-Type": contentType,
+  return {
+    ...options,
+    method,
+    url,
+    headers: {
+      "Content-Type": contentType,
+      ...(options.headers || {}),
+    },
   }
-  return configs
 }
 ```
-#### services.ts
-```typescript
-import Types from './types'
-import request,{getConfigs} from './serviceOption'
 
-export class xxController{
+#### services.ts（生成后的调用风格示例）
+```typescript
+import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"
+const { fetch: request } = requestClass
+
+export class UserController {
   /**
-   * xx业务接口
+   * 获取用户列表
    */
-  static list(params:{
-    /** 名称 */
-    name?:string;
-    ...;
-  }={} as any,options: 使用的请求依赖的的类型，如：AxiosRequestConfig = {}):Promise<通用返回接口<List<XX>>>{
-    return new Promise((resolve,reject)=>{
-      let url = '/xxController/list';
-      const configs:使用的请求依赖的的类型，如：AxiosRequestConfig  = getConfigs(
-        'get',
-        'application/json',
+  static list(
+    params: { name?: string; page?: number } = {} as any,
+    options: RequestConfig = {}
+  ): Promise<{ list: UserVO[]; total: number }> {
+    return new Promise((resolve, reject) => {
+      const url = "/user/list"
+      const configs = getConfigs(
+        "get",
+        "application/json",
         url,
         options
-      );
-       let data = null;
-
-      configs.data = data;
-      request(configs, resolve, reject);
+      )
+      configs.params = params
+      request(configs, resolve, reject)
     })
   }
 }
 ```
-#### types.ts 通用类型及接口涉及到的类型
+
+#### types.ts（生成类型示例）
 ```typescript
-export interface XX{
-  /** 名称 */
-  name?:string
-  ...
+export interface UserVO {
+  id?: string
+  name?: string
+  createdAt?: string
 }
 ```
 ## 配置选项
 
 ### VS Code 设置
 [配置项速查](./Releases.md)
-
-## 开发计划
-
-### 近期计划
-- [✅] 支持3.x版本文档解析
-- [✅] 支持2.x版本文档解析
 
 ## 贡献指南
 
@@ -140,6 +135,9 @@ MIT License
 
 ## 版本差异
 [Release](./Releases.md)
+
+## 示例
+[Example](./Example.md)
 
 
 ## 当 URL 需要账号/密码时的交互行为
@@ -169,7 +167,7 @@ MIT License
 
 
 
-## 后续功能扩展
+## 开发计划
 
 
 ### 插件功能与配置扩展清单
@@ -196,6 +194,8 @@ MIT License
 
 | 维度   | 扩展项             | 细化内容（建议做到的粒度）                                   | 实现复杂度 | 风险点                         | 优先级 | 实现 | 兼容v0.0.16 |
 | ------ | ------------------ | ------------------------------------------------------------ | ---------- | ------------------------------ | ------ | ---- | ----------- |
+| 功能   | 文档生成           | 支持3.x版本文档解析                                          | 高         | 手写生成，每次修改都是两套     | P00    | ✅    | ✅           |
+| ^      | ^                  | 支持2.x版本文档解析                                          | ^          | ^                              | P00    | ✅    | ✅           |
 | 配置   | HTTP 客户端适配    | 支持 axios/fetch/自定义模板三档；可配置 request 导入路径、拦截器注入位 | 中         | 各项目请求封装差异大           | P1     | ✅    | ✅           |
 | 配置   | 类型映射 TypeMap   | 支持 int64→string、date-time→string/Date、binary→Blob；允许覆盖默认映射 | 低-中      | 历史代码类型变更导致编译告警   | P1     | ✅    | ✅           |
 | 配置   | 输出拆分策略       | 单文件 / 按 tag 分文件 / 按模块分目录；可配置文件名规则      | 中         | 导入路径和覆盖策略复杂         | P1     | ✅    | ✅           |
