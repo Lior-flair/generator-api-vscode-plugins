@@ -138,6 +138,7 @@ export class ApiGenerator {
       const typeImportLine = ext === "ts"
         ? (() => {
             const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
+              .filter((name) => name !== "RequestConfig")
             if (usedTypes.length === 0) return ""
             methodsCode = this.prefixTypeReferences(methodsCode, usedTypes)
             return `import type * as Types from "../${naming.typesDirName}"`
@@ -258,12 +259,13 @@ ${methods.join("\n\n")}
       .sort((a, b) => b.length - a.length)
       .reduce((result, typeName) => {
         const escaped = escapeRegExp(typeName)
+        const tail = `(?![A-Za-z0-9_\u4e00-\u9fa5])`
         return result
-          .replace(new RegExp(`(:\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(<\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(\\|\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(&\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(,\\s*)(${escaped})(?!\\s*:)`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(:\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(<\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(\\|\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(&\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(,\\s*)(${escaped})${tail}(?!\\s*:)`, "g"), "$1Types.$2")
       }, code)
   }
 
@@ -379,11 +381,13 @@ ${methods.join("\n\n")}
     // 处理安全定义
     const securityConfig = this.getSecurityConfig(operation)
 
+    const nonQueryPathParameterNotes = this.getNonQueryPathParameterNotes(operation)
     const comment =
       `  /**\n   * ${operation.summary || ""}` +
       (operation.description ? "\n   * " + operation.description : "") +
       (operation.deprecated ? "\n   * @deprecated true" : "") +
       (operation.callbacks ? "\n   * @returns " + operation.callbacks : "") +
+      (nonQueryPathParameterNotes ? `\n   * ${nonQueryPathParameterNotes}` : "") +
       "\n   */"
 
     if (this.httpClientConfig.mode !== "axios-wrapper") {
@@ -430,6 +434,7 @@ ${methods.join("\n\n")}
     if (operation.parameters) {
       operation.parameters.forEach((param: any) => {
         if (this.isParameterObject(param)) {
+          if (param.in !== "path" && param.in !== "query") return
           const paramName = param.name
           const isRequired = param.required === true
           const type = this.getTypeScriptType(
@@ -487,6 +492,24 @@ ${methods.join("\n\n")}
     return `params: {${params.join(
       ", "
     )}} = {} as any, options: RequestConfig = {} `
+  }
+
+  private getNonQueryPathParameterNotes(operation: any): string {
+    if (!operation.parameters || !Array.isArray(operation.parameters)) return ""
+
+    const notes = operation.parameters
+      .filter((param: any) => this.isParameterObject(param))
+      .filter((param: any) => param.in !== "path" && param.in !== "query")
+      .map((param: any) => {
+        const type = this.getTypeScriptType(
+          param.schema || param,
+          operation.components?.schemas || {}
+        )
+        const requiredMark = param.required ? "required" : "optional"
+        return `@param [${param.in}] ${param.name}: ${type} (${requiredMark})`
+      })
+
+    return notes.join("\n   * ")
   }
 
   private getReturnType(operation: any): string {

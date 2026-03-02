@@ -186,12 +186,13 @@ export class ApiGenerator {
       .sort((a, b) => b.length - a.length)
       .reduce((result, typeName) => {
         const escaped = escapeRegExp(typeName)
+        const tail = `(?![A-Za-z0-9_\u4e00-\u9fa5])`
         return result
-          .replace(new RegExp(`(:\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(<\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(\\|\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(&\\s*)(${escaped})`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(,\\s*)(${escaped})(?!\\s*:)`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(:\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(<\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(\\|\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(&\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(,\\s*)(${escaped})${tail}(?!\\s*:)`, "g"), "$1Types.$2")
       }, code)
   }
 
