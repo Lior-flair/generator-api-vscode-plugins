@@ -10,6 +10,7 @@ import {
   type CompatibilityVersion,
   type FormatTypeMappings,
   generateRequestScaffoldFile,
+  buildRequestTemplateContent,
   type HttpClientConfig,
   type HttpClientMode,
 } from "./generatorCommon"
@@ -557,11 +558,127 @@ export function activate(context: vscode.ExtensionContext) {
     }
   )
 
+  // ─── generateRequestTemplate 命令 ──────────────────────────────────────────
+  const generateRequestTemplateCommand = vscode.commands.registerCommand(
+    "generator-ts-api.generateRequestTemplate",
+    async () => {
+      const config = vscode.workspace.getConfiguration("generator-ts-api")
+      const configMode = ((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
+      const configOutputType = (config.get("outputType") as string) || "ts"
+
+      // ── 步骤 1：选择 HTTP 客户端模式 ──────────────────────────────────────
+      const modeItems: (vscode.QuickPickItem & { value: HttpClientMode })[] = [
+        {
+          label: "$(symbol-class) axios-wrapper",
+          description: "（推荐）getConfigs + request 包装器风格，含完整封装",
+          value: "axios-wrapper",
+          picked: configMode === "axios-wrapper",
+        },
+        {
+          label: "$(symbol-method) axios",
+          description: "axios 直调：生成 axios.get / axios.post 风格",
+          value: "axios",
+          picked: configMode === "axios",
+        },
+        {
+          label: "$(globe) fetch",
+          description: "原生 fetch 直调，无需 axios 依赖",
+          value: "fetch",
+          picked: configMode === "fetch",
+        },
+      ]
+
+      const selectedMode = await vscode.window.showQuickPick(modeItems, {
+        title: "生成 Request 模板文件 — 选择 HTTP 客户端模式",
+        placeHolder: `当前配置: ${configMode}`,
+        matchOnDescription: true,
+      })
+      if (!selectedMode) return
+
+      const chosenMode: HttpClientMode = selectedMode.value
+
+      // ── 步骤 2：确认 import 路径（fetch 模式跳过）─────────────────────────
+      let importPath = ""
+      if (chosenMode !== "fetch") {
+        let defaultImportPath = (config.get("requestImportPath") as string) || ""
+        if (!defaultImportPath) {
+          defaultImportPath = chosenMode === "axios" ? "axios" : "axios"
+        }
+        const inputValue = await vscode.window.showInputBox({
+          title: "生成 Request 模板文件 — 填写 axios import 路径",
+          prompt: `填写 axios 库的 import 路径（留空使用默认值 "axios"）`,
+          value: defaultImportPath,
+          placeHolder: "axios",
+          ignoreFocusOut: true,
+        })
+        if (inputValue === undefined) return // 用户取消
+        importPath = inputValue.trim() || "axios"
+      }
+
+      // ── 步骤 3：选择输出文件类型 ──────────────────────────────────────────
+      const extItems = [
+        { label: "TypeScript (.ts)", value: "ts", picked: configOutputType === "ts" },
+        { label: "JavaScript (.js)", value: "js", picked: configOutputType === "js" },
+      ]
+      const selectedExt = await vscode.window.showQuickPick(extItems, {
+        title: "生成 Request 模板文件 — 选择输出文件类型",
+        placeHolder: "选择输出文件后缀",
+      })
+      if (!selectedExt) return
+      const ext = selectedExt.value
+
+      // ── 步骤 4：选择保存位置 ──────────────────────────────────────────────
+      const saveUri = await vscode.window.showSaveDialog({
+        title: "保存 Request 模板文件",
+        defaultUri: vscode.Uri.file(`request.${ext}`),
+        filters: ext === "ts" ? { TypeScript: ["ts"] } : { JavaScript: ["js"] },
+        saveLabel: "生成",
+      })
+      if (!saveUri) return
+      const outputFsPath = saveUri.fsPath
+
+      // ── 步骤 5：若文件已存在，询问是否覆盖 ───────────────────────────────
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const fs = require("fs")
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pathModule = require("path")
+      if (fs.existsSync(outputFsPath)) {
+        const overwrite = await vscode.window.showWarningMessage(
+          `文件 "${pathModule.basename(outputFsPath)}" 已存在，是否覆盖？`,
+          { modal: true },
+          "覆盖"
+        )
+        if (overwrite !== "覆盖") return
+      }
+
+      // ── 步骤 6：生成内容并写入文件 ────────────────────────────────────────
+      const content = buildRequestTemplateContent(chosenMode, importPath, ext)
+      if (!content) {
+        vscode.window.showErrorMessage("所选模式不支持生成模板（custom 模式需手动编写）")
+        return
+      }
+
+      const outputDir = pathModule.dirname(outputFsPath)
+      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
+      fs.writeFileSync(outputFsPath, content, "utf-8")
+
+      const openAction = "打开文件"
+      const msg = await vscode.window.showInformationMessage(
+        `Request 模板文件已生成：${pathModule.basename(outputFsPath)}`,
+        openAction
+      )
+      if (msg === openAction) {
+        vscode.window.showTextDocument(saveUri)
+      }
+    }
+  )
+
   context.subscriptions.push(
     generateCommand,
     generateFromUrlCommand,
     generateFromFileCommand,
-    generateMockCommand
+    generateMockCommand,
+    generateRequestTemplateCommand
   )
 }
 

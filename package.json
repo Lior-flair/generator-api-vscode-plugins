@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "从后端API文档生成前端TypeScript/JavaScript代码",
   "icon": "1759111754.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Lior",
   "license": "MIT", 
   "repository": {
@@ -38,6 +38,10 @@
       {
         "command": "generator-ts-api.generateMock",
         "title": "生成Mock数据"
+      },
+      {
+        "command": "generator-ts-api.generateRequestTemplate",
+        "title": "生成封装Request模板文件"
       }
     ],
     "configuration": {

@@ -252,9 +252,9 @@ output/
 
 ---
 
-## 13) 生成 request.ts 样板
+## 13) 生成 request.ts 样板（随 API 代码自动生成）
 
-适合：新项目快速补齐请求拦截器骨架。
+适合：新项目快速补齐请求拦截器骨架，每次生成 API 时自动写入。
 
 ```jsonc
 {
@@ -264,7 +264,118 @@ output/
 
 说明：
 - 仅在目标目录不存在同名 `request.ts` 时生成。
-- 已存在时不会覆盖。
+- 已存在时不会覆盖，保护手动修改。
+- 生成内容为富注释模板，含请求/响应拦截器示例注释、完整类型签名。
+
+---
+
+## 14b) 独立生成封装 Request 模板文件
+
+适合：不想依赖 API 生成流程、需要单独生成或重新生成 request 文件。
+
+**执行命令**：命令面板 → `生成封装Request模板文件`
+
+### 步骤引导
+
+1. **选择 HTTP 客户端模式**（默认高亮配置中的模式）
+
+   | 选项 | 说明 |
+   |---|---|
+   | `axios-wrapper` | getConfigs + request 包装器，与生成的 API 代码完全匹配 |
+   | `axios` | axios 实例直调风格 |
+   | `fetch` | 原生 fetch，无 axios 依赖 |
+
+2. **填写 axios import 路径**（fetch 模式跳过）
+   - 预填配置中的路径，留空默认 `"axios"`
+
+3. **选择输出文件类型**：`.ts` 或 `.js`
+
+4. **选择保存位置**：文件已存在时提示确认覆盖
+
+### 生成示例（axios-wrapper + .ts）
+
+```typescript
+import axios, { type AxiosRequestConfig, type AxiosResponse,
+  type InternalAxiosRequestConfig, type Method } from 'axios'
+
+export interface RequestConfig extends AxiosRequestConfig {}
+export interface RequestOptions extends AxiosRequestConfig {}
+
+const instance = axios.create({ baseURL: '', timeout: 10000 })
+
+// ── 请求拦截器
+instance.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    // const token = localStorage.getItem('token')
+    // if (token) config.headers['Authorization'] = `Bearer ${token}`
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+// ── 响应拦截器
+instance.interceptors.response.use(
+  (response: AxiosResponse) => {
+    // const { code, message, data } = response.data
+    // if (code !== 0) return Promise.reject(new Error(message))
+    return response.data
+  },
+  (error) => {
+    // if (error.response?.status === 401) location.href = '/login'
+    return Promise.reject(error)
+  }
+)
+
+export function getConfigs(
+  method: Method, contentType: string, url: string,
+  options: RequestOptions = {}
+): RequestConfig {
+  return {
+    method, url,
+    headers: { 'Content-Type': contentType, ...(options.headers || {}) },
+    ...options,
+  }
+}
+
+function request(
+  configs: AxiosRequestConfig,
+  resolve: (value: any) => void,
+  reject: (reason?: any) => void
+): void {
+  instance(configs).then(resolve).catch(reject)
+}
+
+export default request
+```
+
+### 生成示例（fetch + .ts）
+
+```typescript
+// ── 请求拦截器
+async function requestInterceptor(
+  url: string, options: RequestInit
+): Promise<[string, RequestInit]> {
+  // const token = localStorage.getItem('token')
+  // if (token) options.headers = { ...options.headers, Authorization: `Bearer ${token}` }
+  return [url, options]
+}
+
+// ── 响应拦截器
+async function responseInterceptor<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`)
+  }
+  return response.json() as Promise<T>
+}
+
+export async function fetchRequest<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const [finalUrl, finalOptions] = await requestInterceptor(url, options)
+  const response = await fetch(finalUrl, finalOptions)
+  return responseInterceptor<T>(response)
+}
+
+export default fetchRequest
+```
 
 ---
 
@@ -544,7 +655,8 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 - 生成类型不符合预期：检查 `compatibilityVersion` 与 `typeMapping.formatMap`。
 - 还是旧导入风格：检查 `httpClient` 是否仍是 `axios-wrapper`。
 - 没拆分文件：检查 `outputSplit` 是否为 `byTag`。
-- 没生成 `request.ts`：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
+- 没生成 `request.ts`（随 API 代码）：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
+- 想单独生成 request 文件：使用命令面板执行 `生成封装Request模板文件`，可选择模式和保存位置，已存在文件会提示确认覆盖。
 
 ---
 

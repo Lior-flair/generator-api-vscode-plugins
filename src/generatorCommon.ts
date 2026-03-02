@@ -249,6 +249,271 @@ export function buildMethodBody(
 }
 
 /**
+ * 根据 HTTP 客户端模式构建 request 模板文件内容字符串
+ */
+export function buildRequestTemplateContent(mode: HttpClientMode, importPath: string, ext: string = "ts"): string {
+  const isTs = ext !== "js"
+  switch (mode) {
+    case "axios-wrapper": {
+      const imp = importPath || "axios"
+      if (isTs) {
+        return [
+          `import axios, { type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig, type Method } from '${imp}'`,
+          ``,
+          `export interface RequestConfig extends AxiosRequestConfig {`,
+          `  // 可在此扩展自定义请求配置字段`,
+          `}`,
+          ``,
+          `export interface RequestOptions extends AxiosRequestConfig {`,
+          `  // 可在此扩展自定义请求选项字段`,
+          `}`,
+          ``,
+          `const instance = axios.create({`,
+          `  baseURL: '',`,
+          `  timeout: 10000,`,
+          `})`,
+          ``,
+          `// ── 请求拦截器 ──────────────────────────────────────────────────────────────`,
+          `instance.interceptors.request.use(`,
+          `  (config: InternalAxiosRequestConfig) => {`,
+          `    // 在此添加请求前的处理逻辑，例如注入 Token`,
+          `    // const token = localStorage.getItem('token')`,
+          `    // if (token) config.headers['Authorization'] = \`Bearer \${token}\``,
+          `    return config`,
+          `  },`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `// ── 响应拦截器 ──────────────────────────────────────────────────────────────`,
+          `instance.interceptors.response.use(`,
+          `  (response: AxiosResponse) => {`,
+          `    // 统一处理响应，例如只返回 data 字段，或检查业务错误码`,
+          `    // const { code, message, data } = response.data`,
+          `    // if (code !== 0) return Promise.reject(new Error(message))`,
+          `    // return data`,
+          `    return response.data`,
+          `  },`,
+          `  (error) => {`,
+          `    // 统一处理 HTTP 错误，例如 401 跳转登录页`,
+          `    // if (error.response?.status === 401) location.href = '/login'`,
+          `    return Promise.reject(error)`,
+          `  }`,
+          `)`,
+          ``,
+          `/**`,
+          ` * 构建请求配置对象（由生成的 API 代码调用）`,
+          ` */`,
+          `export function getConfigs(`,
+          `  method: Method,`,
+          `  contentType: string,`,
+          `  url: string,`,
+          `  options: RequestOptions = {}`,
+          `): RequestConfig {`,
+          `  return {`,
+          `    method,`,
+          `    url,`,
+          `    headers: {`,
+          `      'Content-Type': contentType,`,
+          `      ...(options.headers || {}),`,
+          `    },`,
+          `    ...options,`,
+          `  }`,
+          `}`,
+          ``,
+          `/**`,
+          ` * 发起请求（由生成的 API 代码调用）`,
+          ` */`,
+          `function request(`,
+          `  configs: AxiosRequestConfig,`,
+          `  resolve: (value: any) => void,`,
+          `  reject: (reason?: any) => void`,
+          `): void {`,
+          `  instance(configs).then(resolve).catch(reject)`,
+          `}`,
+          ``,
+          `export default request`,
+          ``,
+        ].join("\n")
+      } else {
+        return [
+          `import axios from '${imp}'`,
+          ``,
+          `const instance = axios.create({`,
+          `  baseURL: '',`,
+          `  timeout: 10000,`,
+          `})`,
+          ``,
+          `// 请求拦截器`,
+          `instance.interceptors.request.use(`,
+          `  (config) => {`,
+          `    // const token = localStorage.getItem('token')`,
+          `    // if (token) config.headers['Authorization'] = \`Bearer \${token}\``,
+          `    return config`,
+          `  },`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `// 响应拦截器`,
+          `instance.interceptors.response.use(`,
+          `  (response) => {`,
+          `    return response.data`,
+          `  },`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `/** 构建请求配置对象 */`,
+          `export function getConfigs(method, contentType, url, options = {}) {`,
+          `  return {`,
+          `    method,`,
+          `    url,`,
+          `    headers: { 'Content-Type': contentType, ...(options.headers || {}) },`,
+          `    ...options,`,
+          `  }`,
+          `}`,
+          ``,
+          `/** 发起请求 */`,
+          `function request(configs, resolve, reject) {`,
+          `  instance(configs).then(resolve).catch(reject)`,
+          `}`,
+          ``,
+          `export default request`,
+          ``,
+        ].join("\n")
+      }
+    }
+    case "axios": {
+      const imp = importPath || "axios"
+      if (isTs) {
+        return [
+          `import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from '${imp}'`,
+          ``,
+          `const instance = axios.create({`,
+          `  baseURL: '',`,
+          `  timeout: 10000,`,
+          `})`,
+          ``,
+          `// ── 请求拦截器 ──────────────────────────────────────────────────────────────`,
+          `instance.interceptors.request.use(`,
+          `  (config: InternalAxiosRequestConfig) => {`,
+          `    // const token = localStorage.getItem('token')`,
+          `    // if (token) config.headers['Authorization'] = \`Bearer \${token}\``,
+          `    return config`,
+          `  },`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `// ── 响应拦截器 ──────────────────────────────────────────────────────────────`,
+          `instance.interceptors.response.use(`,
+          `  (response: AxiosResponse) => {`,
+          `    // return response.data`,
+          `    return response`,
+          `  },`,
+          `  (error) => {`,
+          `    // if (error.response?.status === 401) location.href = '/login'`,
+          `    return Promise.reject(error)`,
+          `  }`,
+          `)`,
+          ``,
+          `export default instance`,
+          ``,
+        ].join("\n")
+      } else {
+        return [
+          `import axios from '${imp}'`,
+          ``,
+          `const instance = axios.create({`,
+          `  baseURL: '',`,
+          `  timeout: 10000,`,
+          `})`,
+          ``,
+          `// 请求拦截器`,
+          `instance.interceptors.request.use(`,
+          `  (config) => {`,
+          `    // const token = localStorage.getItem('token')`,
+          `    // if (token) config.headers['Authorization'] = \`Bearer \${token}\``,
+          `    return config`,
+          `  },`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `// 响应拦截器`,
+          `instance.interceptors.response.use(`,
+          `  (response) => response,`,
+          `  (error) => Promise.reject(error)`,
+          `)`,
+          ``,
+          `export default instance`,
+          ``,
+        ].join("\n")
+      }
+    }
+    case "fetch": {
+      if (isTs) {
+        return [
+          `// ── 请求拦截器 ──────────────────────────────────────────────────────────────`,
+          `async function requestInterceptor(`,
+          `  url: string,`,
+          `  options: RequestInit`,
+          `): Promise<[string, RequestInit]> {`,
+          `  // 在此添加请求前的处理逻辑，例如注入 Token`,
+          `  // const token = localStorage.getItem('token')`,
+          `  // if (token) options.headers = { ...options.headers, Authorization: \`Bearer \${token}\` }`,
+          `  return [url, options]`,
+          `}`,
+          ``,
+          `// ── 响应拦截器 ──────────────────────────────────────────────────────────────`,
+          `async function responseInterceptor<T>(response: Response): Promise<T> {`,
+          `  if (!response.ok) {`,
+          `    throw new Error(\`HTTP error! status: \${response.status} \${response.statusText}\`)`,
+          `  }`,
+          `  return response.json() as Promise<T>`,
+          `}`,
+          ``,
+          `/**`,
+          ` * 封装 fetch 请求`,
+          ` */`,
+          `export async function fetchRequest<T>(url: string, options: RequestInit = {}): Promise<T> {`,
+          `  const [finalUrl, finalOptions] = await requestInterceptor(url, options)`,
+          `  const response = await fetch(finalUrl, finalOptions)`,
+          `  return responseInterceptor<T>(response)`,
+          `}`,
+          ``,
+          `export default fetchRequest`,
+          ``,
+        ].join("\n")
+      } else {
+        return [
+          `// 请求拦截器`,
+          `async function requestInterceptor(url, options) {`,
+          `  // const token = localStorage.getItem('token')`,
+          `  // if (token) options.headers = { ...options.headers, Authorization: \`Bearer \${token}\` }`,
+          `  return [url, options]`,
+          `}`,
+          ``,
+          `// 响应拦截器`,
+          `async function responseInterceptor(response) {`,
+          `  if (!response.ok) throw new Error(\`HTTP error! status: \${response.status}\`)`,
+          `  return response.json()`,
+          `}`,
+          ``,
+          `/** 封装 fetch 请求 */`,
+          `export async function fetchRequest(url, options = {}) {`,
+          `  const [finalUrl, finalOptions] = await requestInterceptor(url, options)`,
+          `  const response = await fetch(finalUrl, finalOptions)`,
+          `  return responseInterceptor(response)`,
+          `}`,
+          ``,
+          `export default fetchRequest`,
+          ``,
+        ].join("\n")
+      }
+    }
+    default:
+      return ""
+  }
+}
+
+/**
  * 在 outputDir 生成 request.ts 样板文件（文件已存在时跳过，不覆盖）
  */
 export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientConfig, ext: string = "ts"): void {
@@ -259,64 +524,9 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
   const scaffoldPath = path.join(outputDir, `request.${ext}`)
   if (fs.existsSync(scaffoldPath)) return // 不覆盖已有文件
 
-  let content = ""
-  switch (cfg.mode) {
-    case "axios":
-      content =
-        `import axios from '${cfg.requestImportPath || "axios"}'\n\n` +
-        `const instance = axios.create({\n  baseURL: '',\n  timeout: 10000,\n})\n\n` +
-        `// TODO: Add request interceptor here\n` +
-        `instance.interceptors.request.use(\n` +
-        `  (config) => {\n    // e.g. config.headers['Authorization'] = 'Bearer ' + getToken()\n    return config\n  },\n` +
-        `  (error) => Promise.reject(error)\n)\n\n` +
-        `// TODO: Add response interceptor here\n` +
-        `instance.interceptors.response.use(\n` +
-        `  (response) => response,\n` +
-        `  (error) => Promise.reject(error)\n)\n\n` +
-        `export default instance\n`
-      break
-    case "axios-wrapper":
-      content =
-        `import axios, { type AxiosRequestConfig, type Method } from 'axios'\n\n` +
-        `export interface RequestConfig extends AxiosRequestConfig {}\n\n` +
-        `export interface RequestOptions extends AxiosRequestConfig {}\n\n` +
-        `const instance = axios.create({\n  baseURL: '',\n  timeout: 10000,\n})\n\n` +
-        `// TODO: Add request interceptor here\n` +
-        `instance.interceptors.request.use(\n` +
-        `  (config) => {\n    // e.g. config.headers['Authorization'] = 'Bearer ' + getToken()\n    return config\n  },\n` +
-        `  (error) => Promise.reject(error)\n)\n\n` +
-        `// TODO: Add response interceptor here\n` +
-        `instance.interceptors.response.use(\n` +
-        `  (response) => response.data,\n` +
-        `  (error) => Promise.reject(error)\n)\n\n` +
-        `export function getConfigs(method: Method, contentType: string, url: string, options: RequestOptions = {}): RequestConfig {\n` +
-        `  return { method, url, headers: { 'Content-Type': contentType, ...(options.headers || {}) }, ...options }\n` +
-        `}\n\n` +
-        `function request(configs: AxiosRequestConfig, resolve: (v: any) => void, reject: (e: any) => void): void {\n` +
-        `  instance(configs).then(resolve).catch(reject)\n` +
-        `}\n\n` +
-        `export default request\n`
-      break
-    case "fetch":
-      content =
-        `// Fetch-based request utility\n\n` +
-        `// TODO: Add request interceptor here\n` +
-        `async function requestInterceptor(url: string, options: RequestInit): Promise<[string, RequestInit]> {\n` +
-        `  // e.g. options.headers = { ...options.headers, Authorization: 'Bearer ' + getToken() }\n` +
-        `  return [url, options]\n}\n\n` +
-        `// TODO: Add response interceptor here\n` +
-        `async function responseInterceptor(response: Response): Promise<Response> {\n` +
-        `  if (!response.ok) throw new Error(response.statusText)\n` +
-        `  return response\n}\n\n` +
-        `export async function fetchRequest<T>(url: string, options: RequestInit = {}): Promise<T> {\n` +
-        `  const [finalUrl, finalOptions] = await requestInterceptor(url, options)\n` +
-        `  const response = await fetch(finalUrl, finalOptions)\n` +
-        `  const intercepted = await responseInterceptor(response)\n` +
-        `  return intercepted.json() as Promise<T>\n}\n`
-      break
-    default:
-      return // custom: 跳过生成
-  }
+  const content = buildRequestTemplateContent(cfg.mode, cfg.requestImportPath, ext)
+  if (!content) return // custom 模式跳过
+
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
   fs.writeFileSync(scaffoldPath, content, "utf-8")
 }

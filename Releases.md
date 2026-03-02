@@ -2,7 +2,102 @@
 
 ## [Unreleased]
 
-### 新增功能
+### [0.1.1] - 2026-03-02
+
+#### 独立生成封装 Request 模板文件（新命令）
+
+新增命令 `generator-ts-api.generateRequestTemplate`，通过向导式交互一键生成可直接使用的 `request.ts` / `request.js` 封装文件。
+
+##### 交互步骤（4 步）
+
+1. **选择 HTTP 客户端模式**：`axios-wrapper` / `axios` / `fetch`，默认高亮当前配置值
+2. **填写 axios import 路径**（`fetch` 模式跳过）：预填配置中的路径，留空使用 `"axios"`
+3. **选择输出文件类型**：`.ts` / `.js`，默认跟随 `outputType` 配置
+4. **选择保存位置**：文件已存在时弹出确认覆盖对话框，不静默覆盖
+
+##### 各模式生成内容对比
+
+| 模式 | 生成内容亮点 |
+|---|---|
+| `axios-wrapper` | `RequestConfig` / `RequestOptions` interface、请求+响应拦截器（含 Token 注釋示例）、`getConfigs(method, contentType, url, options)` 函数、`request(configs, resolve, reject)` 包装函数、`export default request` |
+| `axios` | axios 实例、请求+响应拦截器（含注释示例）、`export default instance` |
+| `fetch` | `requestInterceptor` / `responseInterceptor` 异步函数、`fetchRequest<T>` 封装函数、`export default fetchRequest` |
+| `custom` | 跳过（自定义模板模式无法自动生成）|
+
+##### 生成示例（axios-wrapper + TypeScript）
+
+```typescript
+import axios, { type AxiosRequestConfig, type AxiosResponse, type InternalAxiosRequestConfig, type Method } from 'axios'
+
+export interface RequestConfig extends AxiosRequestConfig {
+  // 可在此扩展自定义请求配置字段
+}
+
+export interface RequestOptions extends AxiosRequestConfig {
+  // 可在此扩展自定义请求选项字段
+}
+
+const instance = axios.create({
+  baseURL: '',
+  timeout: 10000,
+})
+
+// ── 请求拦截器
+instance.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    // const token = localStorage.getItem('token')
+    // if (token) config.headers['Authorization'] = `Bearer ${token}`
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+// ── 响应拦截器
+instance.interceptors.response.use(
+  (response: AxiosResponse) => {
+    // const { code, message, data } = response.data
+    // if (code !== 0) return Promise.reject(new Error(message))
+    return response.data
+  },
+  (error) => {
+    // if (error.response?.status === 401) location.href = '/login'
+    return Promise.reject(error)
+  }
+)
+
+export function getConfigs(
+  method: Method,
+  contentType: string,
+  url: string,
+  options: RequestOptions = {}
+): RequestConfig {
+  return {
+    method, url,
+    headers: { 'Content-Type': contentType, ...(options.headers || {}) },
+    ...options,
+  }
+}
+
+function request(
+  configs: AxiosRequestConfig,
+  resolve: (value: any) => void,
+  reject: (reason?: any) => void
+): void {
+  instance(configs).then(resolve).catch(reject)
+}
+
+export default request
+```
+
+#### 增强 generateRequestScaffold 模板内容
+
+配置 `generator-ts-api.generateRequestScaffold: true` 后，自动生成的 `request.ts` 样板内容已与新命令保持一致，升级为含完整注释示例的富内容模板（不再是简单的 TODO 占位）：
+
+- 请求拦截器含 Token 注入注释示例
+- 响应拦截器含业务错误码处理注释示例（`axios-wrapper`）/ HTTP 状态码错误处理（`fetch`）
+- `axios-wrapper` 模式的 `getConfigs` 包含完整类型签名
+
+---
 
 #### Mock 数据自动生成
 
@@ -242,7 +337,9 @@ export const handlers = [
 - `generatorCommon.ts` 新增格式映射与兼容策略：默认 `int64 -> string`、`date-time -> string`、`binary -> Blob`，支持 `formatMap` 覆盖与 `0.0.x` 回退兼容
 - `generatorCommon.ts` 新增 `buildImportSnippet(cfg)` — 生成文件顶部 import 代码段
 - `generatorCommon.ts` 新增 `buildMethodBody(cfg, ...)` — 生成 API 方法体
-- `generatorCommon.ts` 新增 `generateRequestScaffoldFile(outputDir, cfg, ext)` — 写入 request.ts 样板
+- `generatorCommon.ts` 新增 `buildRequestTemplateContent(mode, importPath, ext)` — 统一构建 request 模板内容字符串，供命令和自动生成共用
+- `generatorCommon.ts` 重构 `generateRequestScaffoldFile(outputDir, cfg, ext)` — 改为调用 `buildRequestTemplateContent`，内容升级为富注释模板
+- `extension.ts` 新增 `generateRequestTemplateCommand`（命令 `generateRequestTemplate`）— 向导式生成封装 request 文件，支持 4 步交互、文件存在确认覆盖
 - `generatorV3.ts` / `generatorV2.ts`：`generate()` 新增可选第 7 参数 `httpClientConfig`；所有硬编码 import 行改为 `buildImportSnippet()` 动态生成；非 `axios-wrapper` 模式方法签名改为 `async`
 - `extension.ts` 新增 `buildHttpClientConfig()` / `maybeGenerateScaffold()` 辅助函数，三个命令均已对接新配置
 
