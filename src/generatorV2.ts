@@ -352,40 +352,59 @@ export class ApiGenerator {
           op.operationId
         )
 
-        // params type generation
+        const parameters = (op.parameters || []) as any[]
+
+        // params type generation（v2: path/query/body/formData 进入 params；header 写入注释）
         const paramsName = `${controllerName}${methodName}Params`
         const paramsProps: string[] = []
         const seenFields = new Set<string>()
+        const queryParamNames: string[] = []
+        const pathParamNames: string[] = []
+        const headerParamNotes: string[] = []
+        const formDataFieldDefs: string[] = []
+        let formDataRequired = false
+        let hasBody = false
+        let hasFormData = false
 
         // collect parameters array (path, query, header, formData, body)
-        const parameters = (op.parameters || []) as any[]
         for (const param of parameters) {
           if ((param as any).$ref) continue
           const inType = param.in
+          const pname = param.name
+          const isRequired = param.required === true
+
           if (inType === "body") {
             const schema = param.schema as OpenAPIV2.SchemaObject
             const t = this.getTypByProperties(schema)
             if (!seenFields.has("body")) {
-              paramsProps.push(`  body${param.required ? "" : "?"}: ${t}`)
+              paramsProps.push(`  body${isRequired ? "" : "?"}: ${t}`)
               seenFields.add("body")
             }
+            hasBody = true
           } else if (inType === "formData") {
             const schemaType = (param as any).type ? this.getTypByProperties(param as any) : "any"
-            const key = "formData" + (param.name ? `_${param.name}` : "")
-            if (!seenFields.has(key)) {
-              // collect individual form fields under formData object
-              // we'll represent as formData?: { field: type }
-              paramsProps.push(`  formData${param.required ? "" : "?"}: { ${param.name}: ${schemaType} }`)
-              seenFields.add(key)
-            }
+            formDataFieldDefs.push(`"${pname}"${isRequired ? "" : "?"}: ${schemaType}`)
+            if (isRequired) formDataRequired = true
+            hasFormData = true
+          } else if (inType === "path" || inType === "query") {
+            if (seenFields.has(pname)) continue
+            const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
+            paramsProps.push(`/** ${param?.description ? param?.description : ""} */\n  "${pname}"${isRequired ? "" : "?"}: ${t}`)
+            seenFields.add(pname)
+            if (inType === "query") queryParamNames.push(pname)
+            if (inType === "path") pathParamNames.push(pname)
+          } else if (inType === "header") {
+            const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
+            headerParamNotes.push(`@param [header] ${pname}: ${t} (${isRequired ? "required" : "optional"})`)
           } else {
-            const pname = param.name
-            if (!seenFields.has(pname)) {
-              const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
-              paramsProps.push(`/** ${param?.description ? param?.description : ""} */\n  "${pname}"${param.required ? "" : "?"}: ${t}`)
-              seenFields.add(pname)
-            }
+            const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
+            headerParamNotes.push(`@param [${inType || "unknown"}] ${pname}: ${t} (${isRequired ? "required" : "optional"})`)
           }
+        }
+
+        if (formDataFieldDefs.length > 0 && !seenFields.has("formData")) {
+          paramsProps.push(`  formData${formDataRequired ? "" : "?"}: { ${formDataFieldDefs.join(", ")} }`)
+          seenFields.add("formData")
         }
 
         // if no params found, keep empty object
@@ -406,77 +425,27 @@ export class ApiGenerator {
           paramsTypeUsage = `params: ${inlineType} = {} as any, options: RequestConfig = {}`
         }
 
-        /** =-===========================start 处理params */
-        // 在 method 循环内，parameters 遍历前添加：
-        const queryParams: string[] = []
-        const headerParams: string[] = []
-        let hasBody = false
-        let hasFormData = false
-        const formDataFields: { name: string }[] = []
-
-        for (const param of parameters) {
-          if ((param as any).$ref) continue
-          const inType = param.in
-          const pname = param.name
-
-          if (inType === "body") {
-            const schema = param.schema as OpenAPIV2.SchemaObject
-            const t = this.getTypByProperties(schema)
-            if (!seenFields.has("body")) {
-              paramsProps.push(`  body${param.required ? "" : "?"}: ${t}`)
-              seenFields.add("body")
-            }
-            hasBody = true
-          } else if (inType === "formData") {
-            const schemaType = (param as any).type ? this.getTypByProperties(param as any) : "any"
-            const key = "formData" + (param.name ? `_${param.name}` : "")
-            if (!seenFields.has(key)) {
-              paramsProps.push(`  formData${param.required ? "" : "?"}: { ${param.name}: ${schemaType} }`)
-              seenFields.add(key)
-            }
-            hasFormData = true
-            formDataFields.push({ name: pname })
-          } else {
-            const t = param.type ? this.getTypByProperties(param as any) : this.getTypByProperties(param.schema)
-            paramsProps.push(`/** ${param?.description || ""} */\n  "${pname}"${param.required ? "" : "?"}: ${t}`)
-            seenFields.add(pname)
-
-            // 👇 新增：记录运行时分类
-            if (inType === "query" || inType === "path") {
-              queryParams.push(pname)
-            } else if (inType === "header") {
-              headerParams.push(pname)
-            }
-            // path 忽略
-          }
-        }
-
         let optionsAssignment = ""
 
-        if (queryParams.length > 0 || headerParams.length > 0 || hasBody || hasFormData) {
+        if (queryParamNames.length > 0 || hasBody || hasFormData) {
           const parts: string[] = []
 
           // query → options.params
-          if (queryParams.length > 0) {
-            parts.push(`params: params`)
+          if (queryParamNames.length > 0) {
+            const queryObject = `\n    {\n      ${queryParamNames.map((n) => `"${n}": params["${n}"]`).join(",\n      ")}\n    }`
+            parts.push(`params:${queryObject}`)
           }
-
-          // headers → options.headers
-          // if (headerParams.length > 0) {
-          //   const h = headerParams.map((n) => `"${n}": params.${n}`).join(",\n      ")
-          //   parts.push(`headers: {\n      ${h}\n    }`)
-          // }
 
           // body or formData → options.data
           if (hasBody) {
-            parts.push(`data: params`)
+            parts.push(`data: params["body"]`)
           } else if (hasFormData) {
-            parts.push(`data: params`)
+            parts.push(`data: params["formData"]`)
           }
 
           optionsAssignment = `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
         } else {
-          optionsAssignment = "const finalOptions = {...options, params: params};"
+          optionsAssignment = "const finalOptions = { ...options };"
         }
 
         /** =-===========================end 处理params */
@@ -520,8 +489,7 @@ export class ApiGenerator {
 
         // process path inline params replacement
         let processedPath = p as string
-        const pathParams = (op.parameters || []).filter((param: any) => param.in === "path").map((param: any) => param.name)
-        pathParams.forEach((paramName: string) => {
+        pathParamNames.forEach((paramName: string) => {
           const paramPattern = `{${paramName}}`
           if (processedPath.includes(paramPattern)) {
             // insert a literal ${params.xxx} into the generated code
@@ -538,6 +506,7 @@ export class ApiGenerator {
           (op.description && op.description !== op.summary ? "\n* " + op.description : "") +
           (op.deprecated ? "\n* @deprecated true" : "") +
           (op.example ? "\n* @example" + op.example : "") +
+          (headerParamNotes.length > 0 ? `\n* ${headerParamNotes.join("\n* ")}` : "") +
           "\n*/"
 
         let methodCode: string

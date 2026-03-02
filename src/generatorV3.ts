@@ -332,10 +332,10 @@ ${methods.join("\n\n")}
     }
 
     // 处理参数
-    const hasParameters =
-      operation.parameters && operation.parameters.length > 0
-    const isGetMethod = method.toLowerCase() === "get"
-    const shouldSetParams = isGetMethod || hasParameters
+    const hasQueryOrPathParameters = Array.isArray(operation.parameters) && operation.parameters.some(
+      (param: any) => this.isParameterObject(param) && (param.in === "path" || param.in === "query")
+    )
+    const shouldSetParams = hasQueryOrPathParameters
     let params = shouldSetParams ? "configs.params = params;" : ""
     // 处理请求体
     let requestBody = ""
