@@ -133,13 +133,14 @@ export class ApiGenerator {
       const description =
         (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
           this.sanitizeName(tag.name) === controllerKey)?.description || ""
-      const methodsCode = methods.join("\n\n")
+      let methodsCode = methods.join("\n\n")
       const importLine = buildImportSnippet(this.httpClientConfig)
       const typeImportLine = ext === "ts"
         ? (() => {
             const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
             if (usedTypes.length === 0) return ""
-            return `import type { ${usedTypes.join(", ")} } from "../${naming.typesDirName}"`
+            methodsCode = this.prefixTypeReferences(methodsCode, usedTypes)
+            return `import type * as Types from "../${naming.typesDirName}"`
           })()
         : ""
       const controllerCode =
@@ -246,10 +247,24 @@ ${methods.join("\n\n")}
   }
 
   private extractUsedTypeNames(code: string, candidates: string[]): string[] {
-    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     return candidates
-      .filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(code))
+      .filter((name) => code.includes(name))
       .sort((a, b) => a.localeCompare(b))
+  }
+
+  private prefixTypeReferences(code: string, typeNames: string[]): string {
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return [...typeNames]
+      .sort((a, b) => b.length - a.length)
+      .reduce((result, typeName) => {
+        const escaped = escapeRegExp(typeName)
+        return result
+          .replace(new RegExp(`(:\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(<\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(\\|\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(&\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(,\\s*)(${escaped})(?!\\s*:)`, "g"), "$1Types.$2")
+      }, code)
   }
 
   private generateTypeDefinition(

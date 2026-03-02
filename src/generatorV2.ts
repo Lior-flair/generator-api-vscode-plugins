@@ -92,7 +92,7 @@ export class ApiGenerator {
     for (const [name] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
       if (matchName.length === 0 && !this.genericTypes.includes(name)) {
-        typeNames.push(name)
+        typeNames.push(this.sanitizeName(name))
       }
     }
     this.typeNames = Array.from(new Set(typeNames))
@@ -119,7 +119,7 @@ export class ApiGenerator {
     fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
 
     const paramTypeNames = paramTypes
-      .map((typeDef) => typeDef.match(/export interface\s+([A-Za-z0-9_]+)/)?.[1])
+      .map((typeDef) => typeDef.match(/export interface\s+([^\s<{]+)/)?.[1])
       .filter((name): name is string => Boolean(name))
     const typeImportCandidates = Array.from(new Set([
       "List",
@@ -137,13 +137,14 @@ export class ApiGenerator {
       const description = (apiDocs.tags || []).find((t: any) =>
         t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
       )?.description || ""
-      const methodsCode = methods.join("\n\n")
+      let methodsCode = methods.join("\n\n")
       const importLine = buildImportSnippet(this.httpClientConfig)
       const typeImportLine = ext === "ts"
         ? (() => {
             const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
             if (usedTypes.length === 0) return ""
-            return `import type { ${usedTypes.join(", ")} } from "../${naming.typesDirName}"`
+            methodsCode = this.prefixTypeReferences(methodsCode, usedTypes)
+            return `import type * as Types from "../${naming.typesDirName}"`
           })()
         : ""
       const controllerCode =
@@ -174,10 +175,24 @@ export class ApiGenerator {
   }
 
   private extractUsedTypeNames(code: string, candidates: string[]): string[] {
-    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     return candidates
-      .filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(code))
+      .filter((name) => code.includes(name))
       .sort((a, b) => a.localeCompare(b))
+  }
+
+  private prefixTypeReferences(code: string, typeNames: string[]): string {
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return [...typeNames]
+      .sort((a, b) => b.length - a.length)
+      .reduce((result, typeName) => {
+        const escaped = escapeRegExp(typeName)
+        return result
+          .replace(new RegExp(`(:\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(<\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(\\|\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(&\\s*)(${escaped})`, "g"), "$1Types.$2")
+          .replace(new RegExp(`(,\\s*)(${escaped})(?!\\s*:)`, "g"), "$1Types.$2")
+      }, code)
   }
 
   private normalizeFormat(format: unknown): string | undefined {
@@ -574,7 +589,7 @@ export class ApiGenerator {
       const matchName = name.match(/[«《<]/g) || []
       if (matchName.length === 0) {
         if (!this.genericTypes.includes(name) === true) {
-          typeNames.push(name)
+          typeNames.push(this.sanitizeName(name))
         }
       }
     }

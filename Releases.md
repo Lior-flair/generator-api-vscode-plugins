@@ -4,6 +4,16 @@
 
 ### [0.1.1] - 2026-03-02
 
+#### 修复 `byTag` 拆分后`Controller`引入类型问题
+
+旧版：`import type {} from '../types'`
+
+新版：`import type * as Types from "../types"`
+
+- 类型导入改为命名空间形式：`import type * as Types from "../types"`（实际路径仍按配置的 [typesDirName](vscode-file://vscode-app/d:/toolSoft/Microsoft VS Code/072586267e/resources/app/out/vs/code/electron-browser/workbench/workbench.html) 生成）。
+- 在控制器方法代码中，凡是命中 [types/index.ts](vscode-file://vscode-app/d:/toolSoft/Microsoft VS Code/072586267e/resources/app/out/vs/code/electron-browser/workbench/workbench.html) 导出的类型名，都会自动加 `Types.` 前缀（如 `User` → `Types.User`，`List<User>` → `Types.List<Types.User>`）。
+- 仅影响 `byTag` 输出；single 模式逻辑未改。
+
 #### 独立生成封装 Request 模板文件（新命令）
 
 新增命令 `generator-ts-api.generateRequestTemplate`，通过向导式交互一键生成可直接使用的 `request.ts` / `request.js` 封装文件。
