@@ -5,6 +5,11 @@
   "icon": "1759111754.png",
   "version": "0.1.0",
   "publisher": "Lior",
+  "license": "MIT", 
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lior-flair/generator-api-vscode-plugins.git"
+  },
   "publishConfig": {
     
   },
