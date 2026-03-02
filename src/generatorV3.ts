@@ -123,6 +123,8 @@ export class ApiGenerator {
       }
     }
 
+    const typeImportCandidates = Array.from(new Set(this.typeNames))
+
     // ── 3. 写入各 Controller 文件 ─────────────────────────────────
     const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
     for (const [controllerKey, methods] of controllers) {
@@ -131,11 +133,20 @@ export class ApiGenerator {
       const description =
         (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
           this.sanitizeName(tag.name) === controllerKey)?.description || ""
+      const methodsCode = methods.join("\n\n")
       const importLine = buildImportSnippet(this.httpClientConfig)
+      const typeImportLine = ext === "ts"
+        ? (() => {
+            const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
+            if (usedTypes.length === 0) return ""
+            return `import type { ${usedTypes.join(", ")} } from "../${naming.typesDirName}"`
+          })()
+        : ""
       const controllerCode =
-        (importLine ? importLine + "\n\n" : "") +
+        [importLine, typeImportLine].filter(Boolean).join("\n\n") +
+        ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
         `/**\n * ${description}\n */\n` +
-        `export class ${className} {\n${methods.join("\n\n")}\n}\n`
+        `export class ${className} {\n${methodsCode}\n}\n`
       fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
       fileNames.push(fileName)
     }
@@ -232,6 +243,13 @@ ${methods.join("\n\n")}
 
   private sanitizeName(name: string): string {
     return sanitizeName(name)
+  }
+
+  private extractUsedTypeNames(code: string, candidates: string[]): string[] {
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return candidates
+      .filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(code))
+      .sort((a, b) => a.localeCompare(b))
   }
 
   private generateTypeDefinition(

@@ -137,7 +137,7 @@
         "generator-ts-api.requestImportPath": {
           "type": "string",
           "default": "",
-          "description": "request 的 import 路径。axios-wrapper 默认 @/utils/request，axios 默认 axios，fetch 无需填写，custom 模式下留空则不生成 import"
+          "description": "request 的 import 路径。axios-wrapper 默认 @/utils/request，axios 默认 axios，fetch 无需填写；custom 模式可直接填写完整 import 片段（原样插入），留空则不生成 import"
         },
         "generator-ts-api.generateRequestScaffold": {
           "type": "boolean",

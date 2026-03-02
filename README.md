@@ -93,8 +93,7 @@ export const getConfigs = (
 
 #### services.ts（生成后的调用风格示例）
 ```typescript
-import requestClass, { getConfigs, type RequestConfig } from "@/utils/request"
-const { fetch: request } = requestClass
+import request, { getConfigs, type RequestConfig } from "@/utils/request"
 
 export class UserController {
   /**

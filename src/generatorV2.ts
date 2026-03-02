@@ -118,6 +118,17 @@ export class ApiGenerator {
       paramTypes.join("\n\n") + "\n"
     fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
 
+    const paramTypeNames = paramTypes
+      .map((typeDef) => typeDef.match(/export interface\s+([A-Za-z0-9_]+)/)?.[1])
+      .filter((name): name is string => Boolean(name))
+    const typeImportCandidates = Array.from(new Set([
+      "List",
+      "Collection",
+      ...this.typeNames,
+      ...this.genericTypes,
+      ...paramTypeNames,
+    ]))
+
     // ── 2. 写入各 {controllersDirName}/{fileName}.{ext} ───────────
     const fileNames: string[] = []
     for (const [controllerKey, methods] of controllers) {
@@ -126,11 +137,20 @@ export class ApiGenerator {
       const description = (apiDocs.tags || []).find((t: any) =>
         t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
       )?.description || ""
+      const methodsCode = methods.join("\n\n")
       const importLine = buildImportSnippet(this.httpClientConfig)
+      const typeImportLine = ext === "ts"
+        ? (() => {
+            const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
+            if (usedTypes.length === 0) return ""
+            return `import type { ${usedTypes.join(", ")} } from "../${naming.typesDirName}"`
+          })()
+        : ""
       const controllerCode =
-        (importLine ? importLine + "\n\n" : "") +
+        [importLine, typeImportLine].filter(Boolean).join("\n\n") +
+        ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
         `/**\n * ${description}\n */\n` +
-        `export class ${className} {\n${methods.join("\n\n")}\n}\n`
+        `export class ${className} {\n${methodsCode}\n}\n`
       fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
       fileNames.push(fileName)
     }
@@ -151,6 +171,13 @@ export class ApiGenerator {
   }
   private sanitizeName(name: string): string {
     return sanitizeName(name)
+  }
+
+  private extractUsedTypeNames(code: string, candidates: string[]): string[] {
+    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    return candidates
+      .filter((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`).test(code))
+      .sort((a, b) => a.localeCompare(b))
   }
 
   private normalizeFormat(format: unknown): string | undefined {

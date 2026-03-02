@@ -396,7 +396,7 @@ async function testScaffold() {
   check("request.ts 样板文件生成", fs.existsSync(path.join(outDir, "request.ts")))
   const scaffoldContent = fs.readFileSync(path.join(outDir, "request.ts"), "utf-8")
   checkIncludes(scaffoldContent, "export function getConfigs(", "样板文件包含 getConfigs 函数")
-  checkIncludes(scaffoldContent, "export default requestClass", "样板文件导出 requestClass")
+  checkIncludes(scaffoldContent, "export default request", "样板文件导出 request")
 }
 
 // ─── 测试 TypeMapping（latest + 覆盖 + 0.0.x 兼容）──────────────────────────

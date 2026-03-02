@@ -164,13 +164,10 @@ export function buildImportSnippet(cfg: HttpClientConfig): string {
     case "fetch":
       return ""
     case "custom":
-      return ""
+      return (cfg.requestImportPath || "").trim()
     case "axios-wrapper":
     default:
-      return (
-        `import requestClass, { getConfigs, type RequestConfig } from "${cfg.requestImportPath || "@/utils/request"}"\n` +
-        `const { fetch:request} = requestClass`
-      )
+      return `import request, { getConfigs, type RequestConfig } from "${cfg.requestImportPath || "@/utils/request"}"`
   }
 }
 
@@ -280,8 +277,9 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
       break
     case "axios-wrapper":
       content =
-        `import axios, { type AxiosRequestConfig } from 'axios'\n\n` +
+        `import axios, { type AxiosRequestConfig, type Method } from 'axios'\n\n` +
         `export interface RequestConfig extends AxiosRequestConfig {}\n\n` +
+        `export interface RequestOptions extends AxiosRequestConfig {}\n\n` +
         `const instance = axios.create({\n  baseURL: '',\n  timeout: 10000,\n})\n\n` +
         `// TODO: Add request interceptor here\n` +
         `instance.interceptors.request.use(\n` +
@@ -291,13 +289,13 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
         `instance.interceptors.response.use(\n` +
         `  (response) => response.data,\n` +
         `  (error) => Promise.reject(error)\n)\n\n` +
-        `export function getConfigs(method: string, contentType: string, url: string, options: RequestConfig = {}): AxiosRequestConfig {\n` +
+        `export function getConfigs(method: Method, contentType: string, url: string, options: RequestOptions = {}): RequestConfig {\n` +
         `  return { method, url, headers: { 'Content-Type': contentType, ...(options.headers || {}) }, ...options }\n` +
         `}\n\n` +
-        `function fetchFn(configs: AxiosRequestConfig, resolve: (v: any) => void, reject: (e: any) => void): void {\n` +
+        `function request(configs: AxiosRequestConfig, resolve: (v: any) => void, reject: (e: any) => void): void {\n` +
         `  instance(configs).then(resolve).catch(reject)\n` +
         `}\n\n` +
-        `const requestClass = { fetch: fetchFn }\nexport default requestClass\n`
+        `export default request\n`
       break
     case "fetch":
       content =
