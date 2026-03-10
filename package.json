@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "从后端API文档生成前端TypeScript/JavaScript代码",
   "icon": "1759111754.png",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "Lior",
   "license": "MIT", 
   "repository": {

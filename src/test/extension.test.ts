@@ -20,6 +20,12 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(methodName, 'List_v2');
 	});
 
+	test('buildUniqueMethodName should keep only the last path param as suffix to stay compatible', () => {
+		(globalThis as any)._controllerMethodNames = {};
+		const methodName = buildUniqueMethodName('/bizBatteryExchangeRecord/updateById/{id}/{status}', 'BizBatteryExchangeRecordController', 'get', undefined, DEFAULT_NAMING);
+		assert.strictEqual(methodName, 'UpdateByIdByStatus');
+	});
+
 	test('buildImportSnippet should directly use requestImportPath when directReplacementRequestImportPath is true', () => {
 		const importLine = buildImportSnippet({
 			...DEFAULT_HTTP_CLIENT_CONFIG,

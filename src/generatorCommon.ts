@@ -559,8 +559,6 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
       const paramName = part.replace(/[{}]/g, "")
       if (!bySuffix) {
         bySuffix = "By" + paramName.charAt(0).toUpperCase() + paramName.slice(1)
-      } else {
-        bySuffix = paramName.charAt(0).toUpperCase() + paramName.slice(1)
       }
     } else {
       partsIndex.unshift(partStartIndex)
