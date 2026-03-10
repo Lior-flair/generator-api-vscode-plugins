@@ -17,6 +17,7 @@ import {
 export class ApiGenerator {
   private typeNames: string[] = []
   private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
+  private naming: NamingConfig = DEFAULT_NAMING
 
   private initializeTypeNames(apiDocs: any): void {
     // OpenAPI 3.x schemas
@@ -44,6 +45,9 @@ export class ApiGenerator {
 
       // 保存 HTTP 客户端配置供内部方法使用
       this.httpClientConfig = httpClientConfig
+
+      // 保存命名配置供内部方法使用
+      this.naming = namingConfig
 
       // 初始化类型名称
       this.initializeTypeNames(apiDocs)
@@ -307,7 +311,8 @@ ${methods.join("\n\n")}
       path,
       controllerName,
       method,
-      operation.operationId
+      operation.operationId,
+      this.naming
     )
 
     const paramsType = this.getParamsType(operation)

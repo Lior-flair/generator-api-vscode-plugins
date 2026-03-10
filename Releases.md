@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### [0.1.2] - 2026-03-10
+
+#### 修复方法名默认模式下特殊符号未清理的问题
+
+旧版行为：当 `methodNameCasing` 为 `default` 时，路径中的特殊符号（如 `@`、`-`、`.` 等）会直接保留在生成的方法名中，导致生成的代码无法编译。
+
+新版行为：默认模式下，方法名会统一经过 `sanitizeName` 处理，将非法字符替换为下划线 `_`。
+
+示例：
+- 路径 `/user-center/list@v2` → 旧版生成 `List@v2`（语法错误）→ 新版生成 `List_v2`
+- 此修复同时确保方法名判重逻辑与最终输出一致，避免重名误判
+
+#### 新增方法名命名风格配置（`naming.methodNameCasing`）
+
+新增 `generator-ts-api.naming.methodNameCasing` 配置项，支持四种风格：
+
+| 值 | 说明 | 示例 |
+|---|---|---|
+| `default`（默认） | 保持原始方法名，特殊符号替换为 `_` | `List_v2` |
+| `PascalCase` | 大驼峰 | `CreatePaymentIntent` |
+| `camelCase` | 小驼峰 | `createPaymentIntent` |
+| `kebab-case` | 连字符 | `create-payment-intent` |
+
+#### 新增直接替换 import 路径配置（`directReplacementRequestImportPath`）
+
+新增 `generator-ts-api.directReplacementRequestImportPath` 配置项（布尔值，默认 `false`）。
+
+启用后，生成代码文件顶部的 import 语句将**直接使用** `requestImportPath` 配置的完整内容，忽略 `httpClient` 模式的默认 import 生成逻辑。
+
+适用场景：
+- 项目使用非标准请求封装，需要完全自定义 import 语句
+- 需要导入多个模块或使用特殊路径别名
+
+示例配置：
+
+```jsonc
+{
+  "generator-ts-api.directReplacementRequestImportPath": true,
+  "generator-ts-api.requestImportPath": "import { request } from '@/services/http'"
+}
+```
+
+生成代码顶部将直接输出：
+```typescript
+import { request } from '@/services/http'
+```
+
+---
+
 ### [0.1.1] - 2026-03-02
 
 #### 修复 `byTag` 拆分后`Controller`引入类型问题
@@ -310,11 +359,17 @@ export const handlers = [
   "generator-ts-api.naming.controllerFileNameCasing": "default", // "PascalCase" | "camelCase" | "kebab-case"
   "generator-ts-api.naming.controllerClassNameSuffix": "",
 
+  // 方法名命名风格
+  "generator-ts-api.naming.methodNameCasing": "default", // "PascalCase" | "camelCase" | "kebab-case"
+
   // HTTP 客户端模式
   "generator-ts-api.httpClient": "axios-wrapper", // "axios" | "fetch" | "custom"
 
   // request import 路径（留空时按模式自动填充默认值）
   "generator-ts-api.requestImportPath": "",
+
+  // 为 true 时直接使用 requestImportPath 内容作为 import 片段
+  "generator-ts-api.directReplacementRequestImportPath": false,
 
   // 是否生成 request.ts 拦截器样板（不覆盖已有文件）
   "generator-ts-api.generateRequestScaffold": false,
@@ -352,6 +407,9 @@ export const handlers = [
 - `extension.ts` 新增 `generateRequestTemplateCommand`（命令 `generateRequestTemplate`）— 向导式生成封装 request 文件，支持 4 步交互、文件存在确认覆盖
 - `generatorV3.ts` / `generatorV2.ts`：`generate()` 新增可选第 7 参数 `httpClientConfig`；所有硬编码 import 行改为 `buildImportSnippet()` 动态生成；非 `axios-wrapper` 模式方法签名改为 `async`
 - `extension.ts` 新增 `buildHttpClientConfig()` / `maybeGenerateScaffold()` 辅助函数，三个命令均已对接新配置
+- `generatorCommon.ts` `HttpClientConfig` 新增 `directReplacementRequestImportPath` 字段；`buildImportSnippet()` 增加优先分支：为 `true` 时直接返回 `requestImportPath`
+- `generatorCommon.ts` `NamingConfig` 新增 `methodNameCasing` 字段；`buildUniqueMethodName()` 重构为统一归一化逻辑
+- `generatorV2.ts` / `generatorV3.ts`：`buildUniqueMethodName()` 调用新增 `naming` 参数传递
 
 ---
 

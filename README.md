@@ -41,6 +41,11 @@
 - ✅ 生成内容含请求拦截器、响应拦截器、`getConfigs`、`export default request` 等完整骨架
 - ✅ 文件已存在时提示确认覆盖，不静默覆盖
 
+### 7) 命名风格与 import 定制
+- ✅ 方法名命名风格配置（`default` / `PascalCase` / `camelCase` / `kebab-case`）
+- ✅ 默认模式自动将特殊符号替换为下划线 `_`，确保生成代码可编译
+- ✅ 支持直接替换 import 路径（`directReplacementRequestImportPath`），完全自定义 import 语句
+
 ### 3) 类型与结构处理
 - ✅ 常见 OpenAPI 类型推导
 - ✅ 请求/响应结构映射

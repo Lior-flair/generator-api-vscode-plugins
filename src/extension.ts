@@ -27,6 +27,7 @@ let urlHistory: string[] = [
 /** 从 VS Code 配置构建 HttpClientConfig，自动填充各档默认 import 路径 */
 function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClientConfig {
   const mode = ((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
+  const directReplacementRequestImportPath = (config.get("directReplacementRequestImportPath") as boolean) || false
   const compatibilityVersion = ((config.get("compatibilityVersion") as string) || "latest") as CompatibilityVersion
   const dateTimeTarget = ((config.get("typeMapping.dateTimeTarget") as string) || "string").trim()
   const customFormatMapRaw = (config.get("typeMapping.formatMap") as Record<string, unknown>) || {}
@@ -40,7 +41,7 @@ function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClien
     }
   }
   let requestImportPath = (config.get("requestImportPath") as string) || ""
-  if (!requestImportPath) {
+  if (!directReplacementRequestImportPath && !requestImportPath) {
     switch (mode) {
       case "axios": requestImportPath = "axios"; break
       case "axios-wrapper": requestImportPath = "@/utils/request"; break
@@ -50,6 +51,7 @@ function buildHttpClientConfig(config: vscode.WorkspaceConfiguration): HttpClien
   return {
     mode,
     requestImportPath,
+    directReplacementRequestImportPath,
     generateRequestScaffold: (config.get("generateRequestScaffold") as boolean) || false,
     customTemplateFile: (config.get("customTemplate.templateFile") as string) || undefined,
     customTemplateString: (config.get("customTemplate.templateString") as string) || undefined,
@@ -123,6 +125,7 @@ export function activate(context: vscode.ExtensionContext) {
         controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
         controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
         controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+        methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
       }
 
       // 右侧 loading
@@ -266,6 +269,7 @@ export function activate(context: vscode.ExtensionContext) {
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+            methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
           }
 
           let outputFsPath: string | undefined
@@ -359,6 +363,7 @@ export function activate(context: vscode.ExtensionContext) {
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+            methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
           }
 
           let outputFsPath: string | undefined

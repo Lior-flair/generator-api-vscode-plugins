@@ -34,6 +34,8 @@ export class ApiGenerator {
   private genericEnums: Map<string, string[]> = new Map()
   /** 当前生成任务的 HTTP 客户端配置 */
   private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
+  /** 当前生成任务的命名配置 */
+  private naming: NamingConfig = DEFAULT_NAMING
 
   async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG): Promise<void> {
     try {
@@ -42,6 +44,7 @@ export class ApiGenerator {
       }
 
       this.httpClientConfig = httpClientConfig
+      this.naming = namingConfig
 
       if (outputSplit === "byTag") {
         // 按 Tag 拆分多文件输出
@@ -349,7 +352,8 @@ export class ApiGenerator {
           p as string,
           controllerName,
           method,
-          op.operationId
+          op.operationId,
+          this.naming
         )
 
         const parameters = (op.parameters || []) as any[]

@@ -4,6 +4,7 @@ export interface NamingConfig {
   controllersDirName: string
   controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   controllerClassNameSuffix: string
+  methodNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
 }
 
 export const DEFAULT_NAMING: NamingConfig = {
@@ -11,6 +12,7 @@ export const DEFAULT_NAMING: NamingConfig = {
   controllersDirName: "controllers",
   controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
+  methodNameCasing: "default",
 }
 
 export function sanitizeName(name: string): string {
@@ -100,6 +102,8 @@ export interface HttpClientConfig {
   mode: HttpClientMode
   /** import 路径；axios 默认 'axios'，axios-wrapper 默认 '@/utils/request'，fetch 留空，custom 必填 */
   requestImportPath: string
+  /** 为 true 时直接使用 requestImportPath 内容作为 import 片段，忽略 mode 的默认 import 生成逻辑 */
+  directReplacementRequestImportPath?: boolean
   /** 是否在输出目录生成 request.ts 样板文件（仅首次，不覆盖） */
   generateRequestScaffold: boolean
   /** 自定义模板文件路径（优先于 customTemplateString） */
@@ -115,6 +119,7 @@ export interface HttpClientConfig {
 export const DEFAULT_HTTP_CLIENT_CONFIG: HttpClientConfig = {
   mode: "axios-wrapper",
   requestImportPath: "@/utils/request",
+  directReplacementRequestImportPath: false,
   generateRequestScaffold: false,
   compatibilityVersion: "latest",
   formatTypeMappings: {},
@@ -158,6 +163,9 @@ export function resolveMappedScalarType(
  * 根据 HttpClientConfig 生成 import 代码段（插入到生成文件顶部）
  */
 export function buildImportSnippet(cfg: HttpClientConfig): string {
+  if (cfg.directReplacementRequestImportPath) {
+    return (cfg.requestImportPath || "").trim()
+  }
   switch (cfg.mode) {
     case "axios":
       return `import axios from '${cfg.requestImportPath || "axios"}'`
@@ -531,8 +539,13 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
   fs.writeFileSync(scaffoldPath, content, "utf-8")
 }
 
-export function buildUniqueMethodName(path: string, controllerName: string, method: string, operationId?: string): string {
+export function buildUniqueMethodName(path: string, controllerName: string, method: string, operationId?: string, naming?: NamingConfig): string {
   const usedNames = getControllerMethodNameSet(controllerName)
+  const useDefaultCasing = !naming || naming.methodNameCasing === "default"
+  const normalizeMethodName = (name: string): string => {
+    if (useDefaultCasing) return sanitizeName(name)
+    return applyFileCasing(name, naming.methodNameCasing)
+  }
   const pathParts = path.split("/").filter(Boolean)
   let partStartIndex = pathParts.length > 0 ? pathParts.length - 1 : -1
   const partsIndex: number[] = []
@@ -551,7 +564,7 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
       }
     } else {
       partsIndex.unshift(partStartIndex)
-      const candidate =
+      const rawCandidate =
         partsIndex
           .map((item) => {
             const str = pathParts[item] || ""
@@ -559,6 +572,7 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
             return str.charAt(0).toUpperCase() + str.slice(1)
           })
           .join("") + bySuffix
+      const candidate = normalizeMethodName(rawCandidate)
       if (usedNames.has(`${controllerName}.${candidate}`)) {
         partStartIndex--
       } else {
@@ -576,8 +590,10 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
       })
       .join("") + bySuffix
 
+  methodName = normalizeMethodName(methodName)
+
   if (!methodName || usedNames.has(`${controllerName}.${methodName}`)) {
-    methodName = sanitizeName(operationId || getOperationId(path, method))
+    methodName = normalizeMethodName(operationId || getOperationId(path, method))
   }
 
   usedNames.add(`${controllerName}.${methodName}`)

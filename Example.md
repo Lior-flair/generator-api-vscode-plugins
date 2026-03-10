@@ -211,6 +211,25 @@
 
 ---
 
+## 10.3) 直接替换 import 路径（`directReplacementRequestImportPath`）
+
+适合：需要完全自定义 import 语句，不希望插件按模式自动生成。
+
+```jsonc
+{
+  "generator-ts-api.httpClient": "axios-wrapper",
+  "generator-ts-api.directReplacementRequestImportPath": true,
+  "generator-ts-api.requestImportPath": "import { myRequest } from '@/services/http'"
+}
+```
+
+效果：
+- 生成代码顶部直接输出 `import { myRequest } from '@/services/http'`
+- `httpClient` 模式的默认 import 模板被完全忽略
+- 方法体仍按所选 `httpClient` 模式生成（仅 import 行被替换）
+
+---
+
 ## 11) 输出策略：single（单文件）
 
 适合：小项目、接口数量少。
@@ -233,7 +252,8 @@
   "generator-ts-api.naming.typesDirName": "types",
   "generator-ts-api.naming.controllersDirName": "modules",
   "generator-ts-api.naming.controllerFileNameCasing": "kebab-case",
-  "generator-ts-api.naming.controllerClassNameSuffix": "Service"
+  "generator-ts-api.naming.controllerClassNameSuffix": "Service",
+  "generator-ts-api.naming.methodNameCasing": "camelCase"
 }
 ```
 
@@ -650,13 +670,34 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 
 ---
 
-## 25) 快速排查
+## 25) 方法名命名风格（`methodNameCasing`）
+
+适合：希望统一生成方法名为小驼峰或大驼峰风格。
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNameCasing": "camelCase"
+}
+```
+
+| 值 | 路径 `/user-center/list@v2` 生成方法名 |
+|---|---|
+| `default` | `List_v2`（特殊符号替换为 `_`） |
+| `PascalCase` | `ListV2` |
+| `camelCase` | `listV2` |
+| `kebab-case` | `list-v2` |
+
+---
+
+## 26) 快速排查
 
 - 生成类型不符合预期：检查 `compatibilityVersion` 与 `typeMapping.formatMap`。
 - 还是旧导入风格：检查 `httpClient` 是否仍是 `axios-wrapper`。
 - 没拆分文件：检查 `outputSplit` 是否为 `byTag`。
 - 没生成 `request.ts`（随 API 代码）：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
 - 想单独生成 request 文件：使用命令面板执行 `生成封装Request模板文件`，可选择模式和保存位置，已存在文件会提示确认覆盖。
+- 方法名含特殊符号或编译报错：检查 `naming.methodNameCasing`，默认模式会自动将特殊符号替换为 `_`。
+- import 语句不符合预期：启用 `directReplacementRequestImportPath` 并在 `requestImportPath` 中填写完整 import 语句。
 
 ---
 

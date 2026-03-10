@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "从后端API文档生成前端TypeScript/JavaScript代码",
   "icon": "1759111754.png",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "Lior",
   "license": "MIT", 
   "repository": {
@@ -121,6 +121,23 @@
           "default": "",
           "description": "byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）"
         },
+        "generator-ts-api.naming.methodNameCasing": {
+          "type": "string",
+          "enum": [
+            "default",
+            "PascalCase",
+            "camelCase",
+            "kebab-case"
+          ],
+          "default": "default",
+          "enumDescriptions": [
+            "保持生成的原始方法名（与旧版行为一致）",
+            "大驼峰，如 CreatePaymentIntent",
+            "小驼峰，如 createPaymentIntent",
+            "连字符，如 create-payment-intent"
+          ],
+          "description": "生成的 Controller 方法名的命名风格"
+        },
         "generator-ts-api.httpClient": {
           "type": "string",
           "enum": [
@@ -142,6 +159,11 @@
           "type": "string",
           "default": "",
           "description": "request 的 import 路径。axios-wrapper 默认 @/utils/request，axios 默认 axios，fetch 无需填写；custom 模式可直接填写完整 import 片段（原样插入），留空则不生成 import"
+        },
+        "generator-ts-api.directReplacementRequestImportPath": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否直接替换 request 的 import 路径。true 时 requestImportPath 视为完整 import 片段，mode 不再参与 import 生成"
         },
         "generator-ts-api.generateRequestScaffold": {
           "type": "boolean",
