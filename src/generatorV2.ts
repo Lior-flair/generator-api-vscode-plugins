@@ -10,6 +10,8 @@ import {
   DEFAULT_NAMING,
   type HttpClientConfig,
   type NamingConfig,
+  normalizeIdentifierName,
+  normalizeTypeExpression,
   resolveMappedScalarType,
   sanitizeName,
 } from "./generatorCommon"
@@ -84,8 +86,8 @@ export class ApiGenerator {
     for (const [name] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
       if (matchName.length > 0) {
-        this.returnType.set(name, name.replace(/[«《<]/g, "<").replace(/[»》>]/g, ">"))
-        const genericTypesName = name.substring(0, name.search(/[«《<]/g))
+        this.returnType.set(name, this.normalizeTypeExpr(name))
+        const genericTypesName = this.normalizeTypeIdentifier(name.substring(0, name.search(/[«《<]/g)))
         if (!this.genericTypes.includes(genericTypesName)) {
           this.genericTypes.push(genericTypesName)
         }
@@ -94,8 +96,9 @@ export class ApiGenerator {
     const typeNames: string[] = []
     for (const [name] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
-      if (matchName.length === 0 && !this.genericTypes.includes(name)) {
-        typeNames.push(this.sanitizeName(name))
+      const normalizedName = this.normalizeTypeIdentifier(name)
+      if (matchName.length === 0 && !this.genericTypes.includes(normalizedName)) {
+        typeNames.push(normalizedName)
       }
     }
     this.typeNames = Array.from(new Set(typeNames))
@@ -177,6 +180,14 @@ export class ApiGenerator {
     return sanitizeName(name)
   }
 
+  private normalizeTypeIdentifier(name: string): string {
+    return normalizeIdentifierName(name, this.naming.methodNameCasing)
+  }
+
+  private normalizeTypeExpr(typeExpr: string): string {
+    return normalizeTypeExpression(typeExpr, this.naming.methodNameCasing)
+  }
+
   private extractUsedTypeNames(code: string, candidates: string[]): string[] {
     return candidates
       .filter((name) => code.includes(name))
@@ -214,7 +225,7 @@ export class ApiGenerator {
     if ((p as any).$ref) {
       const ref = (p as any).$ref as string
       const typeName = ref.split("/").pop() || "any"
-      const sanitized = this.sanitizeName(typeName)
+      const sanitized = this.normalizeTypeIdentifier(typeName)
       if (this.typeNames.includes(sanitized)) return sanitized
       return sanitized
     }
@@ -283,7 +294,12 @@ export class ApiGenerator {
 
     this.genericTypes.map((item) => {
       let genericType = ""
-      let findTypeKey = Object.entries(definitions).find(([name]) => name.startsWith(item) && name.match(/[«《<]/g))
+      let findTypeKey = Object.entries(definitions).find(([name]) => {
+        const match = name.match(/[«《<]/g)
+        if (!match) return false
+        const baseName = name.substring(0, name.search(/[«《<]/g))
+        return this.normalizeTypeIdentifier(baseName) === item
+      })
       if (findTypeKey) {
         const key = findTypeKey[0]
         const properties = findTypeKey[1]?.properties || {}
@@ -310,25 +326,28 @@ export class ApiGenerator {
   private generateInterfaceType(apiDocs: OpenAPIV2.Document) {
     const types: string[] = []
     const definitions = apiDocs.definitions || {}
-    this.typeNames.map((item) => {
-      const name = item
-      const schema = definitions[item]
-      if (schema) {
-        const s = schema as OpenAPIV2.SchemaObject
-        if (s.type === "object" || s.properties) {
-          const properties = s.properties || {}
-          const required: string[] = (s.required || []) as string[]
-          const propertyDefs = Object.entries(properties).map(([propName, propSchema]) => {
-            const sanitizedPropName = this.sanitizeName(propName)
-            const isRequired = required.includes(propName)
-            const type = this.getTypByProperties(propSchema as OpenAPIV2.SchemaObject)
-            return `  /** ${(propSchema as any).description || ""} */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
-          })
-          types.push(`export interface ${this.sanitizeName(name)} {\n${propertyDefs.join("\n")}
+    const emittedNames = new Set<string>()
+    for (const [rawName, schema] of Object.entries(definitions)) {
+      if ((rawName.match(/[«《<]/g) || []).length > 0) continue
+      const normalizedName = this.normalizeTypeIdentifier(rawName)
+      if (this.genericTypes.includes(normalizedName)) continue
+      if (emittedNames.has(normalizedName)) continue
+
+      const s = schema as OpenAPIV2.SchemaObject
+      if (s.type === "object" || s.properties) {
+        const properties = s.properties || {}
+        const required: string[] = (s.required || []) as string[]
+        const propertyDefs = Object.entries(properties).map(([propName, propSchema]) => {
+          const sanitizedPropName = this.sanitizeName(propName)
+          const isRequired = required.includes(propName)
+          const type = this.getTypByProperties(propSchema as OpenAPIV2.SchemaObject)
+          return `  /** ${(propSchema as any).description || ""} */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
+        })
+        types.push(`export interface ${normalizedName} {\n${propertyDefs.join("\n")}
 }`)
-        }
+        emittedNames.add(normalizedName)
       }
-    })
+    }
     return types
   }
 
@@ -471,20 +490,20 @@ export class ApiGenerator {
                   returnType = mapped
                 } else {
                   // still record generic mapping if not present
-                  this.returnType.set(orig, orig.replace(/[«《<]/g, "<").replace(/[»》>]/g, ">"))
-                  const base = orig.substring(0, orig.search(/[«《<]/g))
+                  this.returnType.set(orig, this.normalizeTypeExpr(orig))
+                  const base = this.normalizeTypeIdentifier(orig.substring(0, orig.search(/[«《<]/g)))
                   if (!this.genericTypes.includes(base)) this.genericTypes.push(base)
-                  returnType = orig.replace(/[«《<]/g, "<").replace(/[»》>]/g, ">")
+                  returnType = this.normalizeTypeExpr(orig)
                 }
               } else {
                 // non-generic: sanitize name
-                returnType = this.sanitizeName(orig)
+                returnType = this.normalizeTypeIdentifier(orig)
               }
             } else if ((schema as any).$ref) {
               // as a last fallback, derive name from $ref
               const refPath = (schema as any).$ref as string
               const refName = refPath.split("/").pop() || "any"
-              returnType = this.sanitizeName(refName)
+              returnType = this.normalizeTypeIdentifier(refName)
             } else {
               returnType = this.getTypByProperties(schema)
             }
@@ -551,8 +570,8 @@ export class ApiGenerator {
       const matchName = name.match(/[«《<]/g) || []
 
       if (matchName.length > 0) {
-        this.returnType.set(name, name.replace(/[«《<]/g, "<").replace(/[»》>]/g, ">"))
-        const genericTypesName = name.substring(0, name.search(/[«《<]/g))
+        this.returnType.set(name, this.normalizeTypeExpr(name))
+        const genericTypesName = this.normalizeTypeIdentifier(name.substring(0, name.search(/[«《<]/g)))
         if (!this.genericTypes.includes(genericTypesName)) {
           this.genericTypes.push(genericTypesName)
         }
@@ -562,8 +581,9 @@ export class ApiGenerator {
     for (const [name, schema] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
       if (matchName.length === 0) {
-        if (!this.genericTypes.includes(name) === true) {
-          typeNames.push(this.sanitizeName(name))
+        const normalizedName = this.normalizeTypeIdentifier(name)
+        if (!this.genericTypes.includes(normalizedName) === true) {
+          typeNames.push(normalizedName)
         }
       }
     }

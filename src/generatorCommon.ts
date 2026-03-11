@@ -19,6 +19,62 @@ export function sanitizeName(name: string): string {
   return String(name).replace(/[^\u4e00-\u9fa5a-zA-Z0-9_]/g, "_")
 }
 
+const TS_BUILTIN_TYPE_NAMES = new Set([
+  "string",
+  "number",
+  "boolean",
+  "any",
+  "unknown",
+  "never",
+  "void",
+  "null",
+  "undefined",
+  "object",
+  "true",
+  "false",
+  "Date",
+  "Blob",
+  "File",
+  "Record",
+  "Array",
+  "Promise",
+  "Map",
+  "Set",
+  "readonly",
+  "keyof",
+  "infer",
+  "extends",
+  "as",
+])
+
+export function normalizeIdentifierName(
+  name: string,
+  casing: NamingConfig["methodNameCasing"] = "default"
+): string {
+  const normalized = sanitizeName(String(name).trim().replace(/\s+/g, "_"))
+  if (!normalized) return "_"
+  if (casing === "PascalCase") return toPascalCase(normalized)
+  if (casing === "camelCase") return toCamelCase(normalized)
+  if (casing === "kebab-case") return toKebabCase(normalized).replace(/-/g, "_")
+  return normalized
+}
+
+export function normalizeTypeExpression(
+  typeExpr: string,
+  casing: NamingConfig["methodNameCasing"] = "default"
+): string {
+  const normalizedBrackets = String(typeExpr)
+    .replace(/[«《]/g, "<")
+    .replace(/[»》]/g, ">")
+
+  return normalizedBrackets.replace(/[A-Za-z_\u4e00-\u9fa5][A-Za-z0-9_\u4e00-\u9fa5\s-]*/g, (segment) => {
+    const token = segment.trim().replace(/\s+/g, "_")
+    if (!token) return segment
+    if (TS_BUILTIN_TYPE_NAMES.has(token)) return token
+    return normalizeIdentifierName(token, casing)
+  })
+}
+
 export function toPascalCase(s: string): string {
   return s
     .replace(/[-_]+(.)/g, (_, c: string) => c.toUpperCase())

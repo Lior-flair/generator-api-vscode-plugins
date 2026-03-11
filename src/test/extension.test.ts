@@ -3,7 +3,7 @@ import * as assert from 'assert';
 // You can import and use all API from the 'vscode' module
 // as well as import your extension to test it
 import * as vscode from 'vscode';
-import { buildImportSnippet, buildUniqueMethodName, DEFAULT_NAMING, DEFAULT_HTTP_CLIENT_CONFIG } from '../generatorCommon';
+import { buildImportSnippet, buildUniqueMethodName, DEFAULT_NAMING, DEFAULT_HTTP_CLIENT_CONFIG, normalizeTypeExpression } from '../generatorCommon';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -34,5 +34,10 @@ suite('Extension Test Suite', () => {
 			requestImportPath: 'import customClient from "@/custom/request"',
 		});
 		assert.strictEqual(importLine, 'import customClient from "@/custom/request"');
+	});
+
+	test('normalizeTypeExpression should replace invalid spaces and symbols in type names', () => {
+		const normalized = normalizeTypeExpression('接口返回对象<IPage<customer_base 对象>>');
+		assert.strictEqual(normalized, '接口返回对象<IPage<customer_base_对象>>');
 	});
 });

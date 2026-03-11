@@ -10,6 +10,7 @@ import {
   DEFAULT_NAMING,
   type HttpClientConfig,
   type NamingConfig,
+  normalizeIdentifierName,
   resolveMappedScalarType,
   sanitizeName,
 } from "./generatorCommon"
@@ -23,7 +24,7 @@ export class ApiGenerator {
     // OpenAPI 3.x schemas
     if (apiDocs.components?.schemas) {
       Object.keys(apiDocs.components.schemas).forEach((name) => {
-        this.typeNames.push(this.sanitizeName(name))
+        this.typeNames.push(this.normalizeTypeIdentifier(name))
       })
     }
   }
@@ -101,7 +102,7 @@ export class ApiGenerator {
     if (apiDocs.components?.schemas) {
       for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
         if (this.isSchemaObject(schema) && (schema as any).type === "object") {
-          types.push(this.generateTypeDefinition(this.sanitizeName(name), schema as any, apiDocs))
+          types.push(this.generateTypeDefinition(this.normalizeTypeIdentifier(name), schema as any, apiDocs))
         }
       }
     }
@@ -185,7 +186,7 @@ export class ApiGenerator {
       )) {
         if (this.isSchemaObject(schema) && schema.type === "object") {
           const typeDef = this.generateTypeDefinition(
-            this.sanitizeName(name),
+            this.normalizeTypeIdentifier(name),
             schema,
             apiDocs
           )
@@ -249,6 +250,10 @@ ${methods.join("\n\n")}
 
   private sanitizeName(name: string): string {
     return sanitizeName(name)
+  }
+
+  private normalizeTypeIdentifier(name: string): string {
+    return normalizeIdentifierName(name, this.naming.methodNameCasing)
   }
 
   private extractUsedTypeNames(code: string, candidates: string[]): string[] {
@@ -556,7 +561,7 @@ ${methods.join("\n\n")}
       // 从引用路径中提取类型名称
       const typeName = refPath.split("/").pop()
       if (typeName) {
-        const sanitizedName = this.sanitizeName(typeName)
+        const sanitizedName = this.normalizeTypeIdentifier(typeName)
         // 检查是否在已知类型列表中
         if (this.typeNames.includes(sanitizedName)) {
           return sanitizedName
@@ -576,7 +581,7 @@ ${methods.join("\n\n")}
     if (schema.type === "object") {
       // 如果对象有 title 属性，可能是一个命名类型
       if (schema.title) {
-        const sanitizedName = this.sanitizeName(schema.title)
+        const sanitizedName = this.normalizeTypeIdentifier(schema.title)
         if (this.typeNames.includes(sanitizedName)) {
           return sanitizedName
         }
