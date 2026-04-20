@@ -14,6 +14,7 @@ import {
   normalizeTypeExpression,
   resolveMappedScalarType,
   sanitizeName,
+  toPascalCase,
 } from "./generatorCommon"
 
 export class ApiGenerator {
@@ -34,6 +35,8 @@ export class ApiGenerator {
    * 类型的properties中有enum则定义枚举，先有名字后生成enum
    */
   private genericEnums: Map<string, string[]> = new Map()
+  /** string 字段枚举提取为 const + type */
+  private enumDefs: Map<string, string[]> = new Map()
   /** 当前生成任务的 HTTP 客户端配置 */
   private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
   /** 当前生成任务的命名配置 */
@@ -81,6 +84,7 @@ export class ApiGenerator {
     this.returnType = new Map()
     this.typeNames = []
     this.genericEnums = new Map()
+    this.enumDefs = new Map()
 
     const definitions = apiDocs.definitions || {}
     for (const [name] of Object.entries(definitions)) {
@@ -116,10 +120,12 @@ export class ApiGenerator {
     })
 
     // ── 1. 写入 {typesDirName}/index.{ext} ────────────────────────
+    const enumDefsCode = this.buildEnumDefsCode()
     const typesCode =
       `// 生成时间: ${new Date().toISOString()}\n\n` +
       `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
       genericTypesStr.join("\n\n") + "\n\n" +
+      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
       types.join("\n\n") + "\n\n" +
       paramTypes.join("\n\n") + "\n"
     fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
@@ -176,6 +182,33 @@ export class ApiGenerator {
     const isSwagger2 = doc.swagger && doc.swagger.startsWith("2.")
     return (isOpenApi3 || isSwagger2) && doc.info && doc.paths
   }
+
+  private toConstKey(value: string): string {
+    const sanitized = sanitizeName(String(value)).replace(/^_+|_+$/g, "")
+    const pascal = toPascalCase(sanitized || "_")
+    return /^\d/.test(pascal) ? `_${pascal}` : (pascal || "_Unknown")
+  }
+
+  private registerEnumDef(name: string, values: string[]): void {
+    if (!this.enumDefs.has(name)) {
+      this.enumDefs.set(name, values)
+      if (!this.typeNames.includes(name)) this.typeNames.push(name)
+    }
+  }
+
+  private buildEnumDefsCode(): string {
+    if (this.enumDefs.size === 0) return ""
+    const parts: string[] = []
+    for (const [name, values] of this.enumDefs) {
+      const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
+      parts.push(
+        `export const ${name} = {\n${entries},\n} as const\n` +
+        `export type ${name} = typeof ${name}[keyof typeof ${name}]`
+      )
+    }
+    return parts.join("\n\n")
+  }
+
   private sanitizeName(name: string): string {
     return sanitizeName(name)
   }
@@ -340,8 +373,16 @@ export class ApiGenerator {
         const propertyDefs = Object.entries(properties).sort(([a], [b]) => a.localeCompare(b)).map(([propName, propSchema]) => {
           const sanitizedPropName = this.sanitizeName(propName)
           const isRequired = required.includes(propName)
-          const type = this.getTypByProperties(propSchema as OpenAPIV2.SchemaObject)
-          return `  /** ${(propSchema as any).description || ""} */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
+          const ps = propSchema as any
+          let type: string
+          if ((ps.type === "string" || !ps.type) && Array.isArray(ps.enum) && ps.enum.length > 0) {
+            const enumName = normalizedName + toPascalCase(sanitizeName(propName))
+            this.registerEnumDef(enumName, ps.enum)
+            type = enumName
+          } else {
+            type = this.getTypByProperties(ps as OpenAPIV2.SchemaObject)
+          }
+          return `  /** ${ps.description || ""} */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
         })
         types.push(`export interface ${normalizedName} {\n${propertyDefs.join("\n")}
 }`)
@@ -565,6 +606,7 @@ export class ApiGenerator {
   }
 
   private generateCode(apiDocs: OpenAPIV2.Document) {
+    this.enumDefs = new Map()
     const definitions = apiDocs.definitions || {}
     for (const [name, schema] of Object.entries(definitions)) {
       const matchName = name.match(/[«《<]/g) || []
@@ -596,12 +638,14 @@ export class ApiGenerator {
     const { controllerClasses, paramTypes } = this.generateController(apiDocs)
 
     const importLine = buildImportSnippet(this.httpClientConfig)
+    const enumDefsCode = this.buildEnumDefsCode()
     const code =
       (importLine ? importLine + "\n\n" : "") +
       `// 生成时间: ${new Date().toISOString()}\n\n` +
       `// 泛型类型\n` +
       `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
       genericTypesStr.join("\n\n") + "\n\n" +
+      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
       `// 类型定义\n` + types.join("\n\n") + "\n\n" +
       `// 参数类型\n` + paramTypes.join("\n\n") + "\n\n" +
       `// Controller类\n` + controllerClasses.join("\n\n") + "\n"

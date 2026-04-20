@@ -13,10 +13,12 @@ import {
   normalizeIdentifierName,
   resolveMappedScalarType,
   sanitizeName,
+  toPascalCase,
 } from "./generatorCommon"
 
 export class ApiGenerator {
   private typeNames: string[] = []
+  private enumDefs: Map<string, string[]> = new Map()
   private httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
   private naming: NamingConfig = DEFAULT_NAMING
 
@@ -49,6 +51,10 @@ export class ApiGenerator {
 
       // 保存命名配置供内部方法使用
       this.naming = namingConfig
+
+      // 重置状态，避免多次调用残留
+      this.typeNames = []
+      this.enumDefs = new Map()
 
       // 初始化类型名称
       this.initializeTypeNames(apiDocs)
@@ -106,7 +112,11 @@ export class ApiGenerator {
         }
       }
     }
-    const typesCode = `// 生成时间: ${new Date().toISOString()}\n\n// 类型定义\n${types.join("\n\n")}\n`
+    const enumDefsCode = this.buildEnumDefsCode()
+    const typesCode =
+      `// 生成时间: ${new Date().toISOString()}\n\n` +
+      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
+      `// 类型定义\n${types.join("\n\n")}\n`
     fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
 
     // ── 2. 按 Tag 分组生成 Controller 方法 ───────────────────────
@@ -169,6 +179,32 @@ export class ApiGenerator {
 
   private isValidApiDoc(doc: any): boolean {
     return doc.openapi && doc.openapi.startsWith("3.") && doc.info && doc.paths
+  }
+
+  private toConstKey(value: string): string {
+    const sanitized = sanitizeName(String(value)).replace(/^_+|_+$/g, "")
+    const pascal = toPascalCase(sanitized || "_")
+    return /^\d/.test(pascal) ? `_${pascal}` : (pascal || "_Unknown")
+  }
+
+  private registerEnumDef(name: string, values: string[]): void {
+    if (!this.enumDefs.has(name)) {
+      this.enumDefs.set(name, values)
+      if (!this.typeNames.includes(name)) this.typeNames.push(name)
+    }
+  }
+
+  private buildEnumDefsCode(): string {
+    if (this.enumDefs.size === 0) return ""
+    const parts: string[] = []
+    for (const [name, values] of this.enumDefs) {
+      const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
+      parts.push(
+        `export const ${name} = {\n${entries},\n} as const\n` +
+        `export type ${name} = typeof ${name}[keyof typeof ${name}]`
+      )
+    }
+    return parts.join("\n\n")
   }
 
   private generateCode(
@@ -235,9 +271,11 @@ ${methods.join("\n\n")}
 
     // 组合最终代码
     const importLine = buildImportSnippet(this.httpClientConfig)
+    const enumDefsCode = this.buildEnumDefsCode()
     const code =
       (importLine ? importLine + "\n\n" : "") +
       `// 生成时间: ${new Date().toISOString()}\n\n` +
+      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
       `// 类型定义\n${types.join("\n\n")}\n\n` +
       `// Controller类\n${controllerClasses.join("\n\n")}\n`
 
@@ -290,15 +328,16 @@ ${methods.join("\n\n")}
       ([propName, propSchema]) => {
         const sanitizedPropName = this.sanitizeName(propName)
         const isRequired = required.includes(propName)
-        const type = this.getTypeScriptType(
-          propSchema as OpenAPIV3.SchemaObject,
-          apiDocs
-        )
-        return `  /** ${
-          (propSchema as OpenAPIV3.SchemaObject).description ||
-          (propSchema as OpenAPIV3.SchemaObject).title ||
-          ""
-        } */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
+        const ps = propSchema as any
+        let type: string
+        if ((ps.type === "string" || !ps.type) && Array.isArray(ps.enum) && ps.enum.length > 0) {
+          const enumName = name + toPascalCase(sanitizeName(propName))
+          this.registerEnumDef(enumName, ps.enum)
+          type = enumName
+        } else {
+          type = this.getTypeScriptType(ps as OpenAPIV3.SchemaObject, apiDocs)
+        }
+        return `  /** ${ps.description || ps.title || ""} */\n  ${sanitizedPropName}${isRequired ? "" : "?"}: ${type};`
       }
     )
 
