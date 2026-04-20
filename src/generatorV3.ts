@@ -286,7 +286,7 @@ ${methods.join("\n\n")}
     const properties = schema.properties || {}
     const required = schema.required || []
 
-    const propertyDefs = Object.entries(properties).map(
+    const propertyDefs = Object.entries(properties).sort(([a], [b]) => a.localeCompare(b)).map(
       ([propName, propSchema]) => {
         const sanitizedPropName = this.sanitizeName(propName)
         const isRequired = required.includes(propName)
@@ -345,41 +345,28 @@ ${methods.join("\n\n")}
     const hasQueryOrPathParameters = Array.isArray(operation.parameters) && operation.parameters.some(
       (param: any) => this.isParameterObject(param) && (param.in === "path" || param.in === "query")
     )
-    const shouldSetParams = hasQueryOrPathParameters
-    let params = shouldSetParams ? "configs.params = params;" : ""
-    // 处理请求体
+    let paramsAssign = hasQueryOrPathParameters ? "configs.params = params;" : ""
+    // 处理请求体（requestBody 仅用于 buildMethodBody 的 truthy 判断）
     let requestBody = ""
+    let dataAssign = ""
     if (operation.requestBody) {
       const content = operation.requestBody.content
       if (content) {
-        // 优先使用 application/json
         if (content["application/json"]) {
-          requestBody = 'configs.data = params["body"]'
-          if (params) {
-            params = `
-          const {body,...new_params} = params;
-          configs.params = new_params;
-          `
+          requestBody = "application/json"
+          if (paramsAssign) {
+            paramsAssign = "const { body, ...queryParams } = params;\n      configs.params = queryParams;"
+            dataAssign = "configs.data = body;"
+          } else {
+            dataAssign = "configs.data = params.body;"
           }
-        }
-        // 处理 multipart/form-data
-        else if (content["multipart/form-data"]) {
-          requestBody = 'configs.data = params["formData"]'
-          if (params) {
-            params = `
-      const { formData, ...new_params } = params
-      configs.params = new_params
-          `
-          }
-        }
-        // 处理 application/x-www-form-urlencoded
-        else if (content["application/x-www-form-urlencoded"]) {
-          requestBody = 'configs.data = params["formData"]'
-          if (params) {
-            params = `
-      const { formData, ...new_params } = params
-      configs.params = new_params
-          `
+        } else if (content["multipart/form-data"] || content["application/x-www-form-urlencoded"]) {
+          requestBody = content["multipart/form-data"] ? "multipart/form-data" : "application/x-www-form-urlencoded"
+          if (paramsAssign) {
+            paramsAssign = "const { formData, ...queryParams } = params;\n      configs.params = queryParams;"
+            dataAssign = "configs.data = formData;"
+          } else {
+            dataAssign = "configs.data = params.formData;"
           }
         }
       }
@@ -416,7 +403,9 @@ ${methods.join("\n\n")}
     }
 
     // axios-wrapper：保留原有 Promise + getConfigs + request 风格
-    return `${comment}\n  static ${methodName}(${paramsType}): Promise<${returnType}> {\n    return new Promise((resolve, reject) => {\n      const url = \`${processedPath}\`;\n      const configs = getConfigs(\n        '${method}',\n        '${requestContentType}',\n        url,\n        options\n      );\n      ${params}\n      ${requestBody}\n      ${securityConfig}\n      request(configs, resolve, reject);\n    });\n  }`
+    const configLines = [paramsAssign, dataAssign, securityConfig].filter(Boolean)
+    const configSection = configLines.length > 0 ? "\n      " + configLines.join("\n      ") : ""
+    return `${comment}\n  static ${methodName}(${paramsType}): Promise<${returnType}> {\n    return new Promise((resolve, reject) => {\n      const url = \`${processedPath}\`;\n      const configs = getConfigs(\n        '${method}',\n        '${requestContentType}',\n        url,\n        options\n      );${configSection}\n      request(configs, resolve, reject);\n    });\n  }`
   }
 
   private getSecurityConfig(operation: any): string {

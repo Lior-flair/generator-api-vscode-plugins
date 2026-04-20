@@ -305,7 +305,7 @@ export class ApiGenerator {
         const properties = findTypeKey[1]?.properties || {}
         const required: string[] = (properties?.required || []) as string[]
         let propertyDefs: string[] = []
-        for (const [key, typeObj] of Object.entries(properties)) {
+        for (const [key, typeObj] of Object.entries(properties).sort(([a], [b]) => a.localeCompare(b))) {
           const isRequired = required.includes(key)
           propertyDefs.push(`/** ${typeObj?.description} */\n${key}${isRequired ? "" : "?"}: ${getTypeByPropertie(typeObj)}`)
         }
@@ -337,7 +337,7 @@ export class ApiGenerator {
       if (s.type === "object" || s.properties) {
         const properties = s.properties || {}
         const required: string[] = (s.required || []) as string[]
-        const propertyDefs = Object.entries(properties).map(([propName, propSchema]) => {
+        const propertyDefs = Object.entries(properties).sort(([a], [b]) => a.localeCompare(b)).map(([propName, propSchema]) => {
           const sanitizedPropName = this.sanitizeName(propName)
           const isRequired = required.includes(propName)
           const type = this.getTypByProperties(propSchema as OpenAPIV2.SchemaObject)

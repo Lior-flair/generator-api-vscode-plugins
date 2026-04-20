@@ -15,13 +15,21 @@ import {
   type HttpClientMode,
 } from "./generatorCommon"
 
+interface HistoryItem {
+  url: string
+  name?: string
+  swaggerVersion?: string
+}
+
+type HistoryQuickPickItem = vscode.QuickPickItem & { historyItem?: HistoryItem }
+
 // 存储 URL 历史记录
 const MAX_HISTORY_LENGTH = 10
-let urlHistory: string[] = [
-  "http://192.168.18.238:8080/vmoto-admin-api/v3/api-docs",
-  "http://192.168.18.15:8080/v3/api-docs",
-  "http://192.168.18.15:9090/v3/api-docs",
-  "http://localhost:8080/v3/api-docs",
+let urlHistory: HistoryItem[] = [
+  { url: "http://192.168.18.238:8080/vmoto-admin-api/v3/api-docs" },
+  { url: "http://192.168.18.15:8080/v3/api-docs" },
+  { url: "http://192.168.18.15:9090/v3/api-docs" },
+  { url: "http://localhost:8080/v3/api-docs" },
 ]
 
 /** 从 VS Code 配置构建 HttpClientConfig，自动填充各档默认 import 路径 */
@@ -80,22 +88,94 @@ export function activate(context: vscode.ExtensionContext) {
   const apiGeneratorV2 = new ApiGeneratorV2()
   const apiParser = new ApiParser()
 
-  // 从扩展存储中加载历史记录
-  urlHistory = context.globalState.get("urlHistory", urlHistory)
+  // 从扩展存储中加载历史记录，兼容旧版 string[] 格式
+  const rawHistory = context.globalState.get<any[]>("urlHistory")
+  if (rawHistory) {
+    urlHistory = rawHistory.map((item: any) =>
+      typeof item === "string" ? { url: item } : (item as HistoryItem)
+    )
+  }
 
-  // 保存 URL 到历史记录
-  const saveUrlToHistory = (url: string) => {
-    // 移除已存在的相同 URL
-    urlHistory = urlHistory.filter((item) => item !== url)
-    // 添加到开头
-    urlHistory.unshift(url)
-    // 保持历史记录长度
-    if (urlHistory.length > MAX_HISTORY_LENGTH) {
-      urlHistory = urlHistory.slice(0, MAX_HISTORY_LENGTH)
-    }
-    // 保存到扩展存储
+  // 保存 URL 到历史记录（保留已有名称，更新版本）
+  const saveUrlToHistory = (url: string, swaggerVersion?: string) => {
+    const existing = urlHistory.find((item) => item.url === url)
+    urlHistory = urlHistory.filter((item) => item.url !== url)
+    urlHistory.unshift({ url, name: existing?.name, swaggerVersion: swaggerVersion || existing?.swaggerVersion })
+    if (urlHistory.length > MAX_HISTORY_LENGTH) urlHistory = urlHistory.slice(0, MAX_HISTORY_LENGTH)
     context.globalState.update("urlHistory", urlHistory)
   }
+
+  const EDIT_BTN: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("edit"), tooltip: "编辑名称" }
+  const DELETE_BTN: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("trash"), tooltip: "删除" }
+  const COPY_BTN: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("copy"), tooltip: "复制 URL" }
+
+  const buildHistoryItems = (): HistoryQuickPickItem[] => [
+    { label: "输入新URL", description: "手动输入API文档URL" },
+    ...urlHistory.map((item): HistoryQuickPickItem => ({
+      label: item.name || item.url,
+      description: item.name ? item.url : (item.swaggerVersion ? `[${item.swaggerVersion}]` : "历史记录"),
+      historyItem: item,
+      buttons: [EDIT_BTN, DELETE_BTN, COPY_BTN],
+    })),
+  ]
+
+  const showUrlHistoryQuickPick = (): Promise<string | undefined> =>
+    new Promise((resolve) => {
+      const quickPick = vscode.window.createQuickPick<HistoryQuickPickItem>()
+      quickPick.placeholder = "输入新的URL或选择历史记录"
+      quickPick.items = buildHistoryItems()
+      let isHandlingButton = false
+
+      quickPick.onDidAccept(() => {
+        const selection = quickPick.selectedItems[0]
+        if (!selection) { quickPick.hide(); return }
+        if (selection.historyItem) {
+          quickPick.hide()
+          resolve(selection.historyItem.url)
+        } else {
+          quickPick.hide()
+          vscode.window.showInputBox({
+            prompt: "请输入API文档URL",
+            placeHolder: "https://example.com/api-docs",
+            value: urlHistory[0]?.url || "",
+            ignoreFocusOut: true,
+          }).then(resolve)
+        }
+      })
+
+      quickPick.onDidHide(() => { if (!isHandlingButton) resolve(undefined) })
+
+      quickPick.onDidTriggerItemButton(async ({ button, item }: vscode.QuickPickItemButtonEvent<HistoryQuickPickItem>) => {
+        const histItem = item.historyItem
+        if (!histItem) return
+        if (button === COPY_BTN) {
+          await vscode.env.clipboard.writeText(histItem.url)
+          vscode.window.showInformationMessage("URL 已复制到剪切板")
+        } else if (button === DELETE_BTN) {
+          urlHistory = urlHistory.filter((h) => h.url !== histItem.url)
+          context.globalState.update("urlHistory", urlHistory)
+          quickPick.items = buildHistoryItems()
+        } else if (button === EDIT_BTN) {
+          isHandlingButton = true
+          quickPick.hide()
+          const newName = await vscode.window.showInputBox({
+            prompt: "修改历史记录名称",
+            placeHolder: "留空使用 URL 作为显示名称",
+            value: histItem.name || "",
+            ignoreFocusOut: true,
+          })
+          isHandlingButton = false
+          if (newName !== undefined) {
+            histItem.name = newName.trim() || undefined
+            context.globalState.update("urlHistory", urlHistory)
+          }
+          quickPick.items = buildHistoryItems()
+          quickPick.show()
+        }
+      })
+
+      quickPick.show()
+    })
 
   // 获取对应的生成器
   const getGenerator = (apiDocs: any) => {
@@ -207,53 +287,7 @@ export function activate(context: vscode.ExtensionContext) {
   const generateFromUrlCommand = vscode.commands.registerCommand(
     "generator-ts-api.generateFromUrl",
     async () => {
-      // 创建快速选择项
-      const quickPick = vscode.window.createQuickPick()
-      quickPick.placeholder = "输入新的URL或选择历史记录"
-      quickPick.items = [
-        { label: "输入新URL", description: "手动输入API文档URL" },
-        ...urlHistory.map((url) => ({
-          label: url,
-          description: "历史记录",
-        })),
-      ]
-
-      // 处理选择
-      const selected = await new Promise<string | undefined>((resolve) => {
-        quickPick.onDidAccept(() => {
-          const selection = quickPick.selectedItems[0]
-          if (selection) {
-            if (selection.label === "输入新URL") {
-              // 如果选择了"输入新URL"，显示输入框
-              vscode.window
-                .showInputBox({
-                  prompt: "请输入API文档URL",
-                  placeHolder: "https://example.com/api-docs",
-                  value: urlHistory[0] || "",
-                  valueSelection: urlHistory[0]
-                    ? [0, urlHistory[0].length]
-                    : undefined,
-                  ignoreFocusOut: true,
-                })
-                .then(resolve)
-            } else {
-              // 如果选择了历史记录，直接使用
-              resolve(selection.label)
-            }
-          } else {
-            resolve(undefined)
-          }
-          quickPick.hide()
-        })
-
-        quickPick.onDidHide(() => {
-          if (!quickPick.selectedItems.length) {
-            resolve(undefined)
-          }
-        })
-
-        quickPick.show()
-      })
+      const selected = await showUrlHistoryQuickPick()
 
       if (selected) {
         let loading: vscode.StatusBarItem | undefined
@@ -312,8 +346,8 @@ export function activate(context: vscode.ExtensionContext) {
               httpClientConfig
             )
             maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
-            // 保存成功的 URL 到历史记录
-            saveUrlToHistory(selected)
+            // 保存成功的 URL 到历史记录（记录 Swagger 版本）
+            saveUrlToHistory(selected, typeof (apiDocs.openapi || apiDocs.swagger) === "string" ? (apiDocs.openapi || apiDocs.swagger) : undefined)
             vscode.window.showInformationMessage("API文档生成成功！")
           }
         } catch (error: unknown) {
@@ -456,25 +490,7 @@ export function activate(context: vscode.ExtensionContext) {
         let apiDocs: any
 
         if (sourceChoice.value === "url") {
-          const quickPick = vscode.window.createQuickPick()
-          quickPick.placeholder = "输入新的URL或选择历史记录"
-          quickPick.items = [
-            { label: "输入新URL", description: "手动输入API文档URL" },
-            ...urlHistory.map((url) => ({ label: url, description: "历史记录" })),
-          ]
-          const url = await new Promise<string | undefined>((resolve) => {
-            quickPick.onDidAccept(() => {
-              const sel = quickPick.selectedItems[0]
-              if (sel?.label === "输入新URL") {
-                vscode.window.showInputBox({ prompt: "请输入API文档URL", placeHolder: "https://example.com/api-docs", ignoreFocusOut: true }).then(resolve)
-              } else {
-                resolve(sel?.label)
-              }
-              quickPick.hide()
-            })
-            quickPick.onDidHide(() => resolve(undefined))
-            quickPick.show()
-          })
+          const url = await showUrlHistoryQuickPick()
           if (!url) return
           loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
           loading.text = "$(sync~spin) 拉取 API 文档..."
