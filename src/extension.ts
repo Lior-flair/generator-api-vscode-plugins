@@ -13,7 +13,26 @@ import {
   buildRequestTemplateContent,
   type HttpClientConfig,
   type HttpClientMode,
+  type SplitOutputResult,
 } from "./generatorCommon"
+
+/** 调试日志：输出到 VS Code 的「调试控制台」(Debug Console) */
+function log(...args: unknown[]): void {
+  console.log("[generator-ts-api]", ...args)
+}
+
+/** 错误日志：输出到「调试控制台」 */
+function logError(...args: unknown[]): void {
+  console.error("[generator-ts-api]", ...args)
+}
+
+/** 根据生成结果构建成功提示文案 */
+function buildSuccessMessage(result: SplitOutputResult | void): string {
+  if (result) {
+    return `API 代码生成成功！共 ${result.controllerCount} 个控制器、${result.typeCount} 个类型，写入 ${result.fileCount} 个文件`
+  }
+  return "API 代码生成成功！"
+}
 
 interface HistoryItem {
   url: string
@@ -124,26 +143,34 @@ export function activate(context: vscode.ExtensionContext) {
       const quickPick = vscode.window.createQuickPick<HistoryQuickPickItem>()
       quickPick.placeholder = "输入新的URL或选择历史记录"
       quickPick.items = buildHistoryItems()
-      let isHandlingButton = false
+      // 为 true 时，quickPick.hide() 触发的 onDidHide 不再 resolve(undefined)，
+      // 用于「输入新URL」「编辑名称」等会主动隐藏面板再异步取值的场景
+      let suppressHideResolve = false
 
       quickPick.onDidAccept(() => {
         const selection = quickPick.selectedItems[0]
         if (!selection) { quickPick.hide(); return }
         if (selection.historyItem) {
           quickPick.hide()
+          log("已选择历史 URL:", selection.historyItem.url)
           resolve(selection.historyItem.url)
         } else {
+          // 先标记，避免 hide() 触发的 onDidHide 抢先 resolve(undefined)
+          suppressHideResolve = true
           quickPick.hide()
           vscode.window.showInputBox({
             prompt: "请输入API文档URL",
             placeHolder: "https://example.com/api-docs",
             value: urlHistory[0]?.url || "",
             ignoreFocusOut: true,
-          }).then(resolve)
+          }).then((value) => {
+            log("已输入新 URL:", value ?? "(取消)")
+            resolve(value)
+          })
         }
       })
 
-      quickPick.onDidHide(() => { if (!isHandlingButton) resolve(undefined) })
+      quickPick.onDidHide(() => { if (!suppressHideResolve) resolve(undefined) })
 
       quickPick.onDidTriggerItemButton(async ({ button, item }: vscode.QuickPickItemButtonEvent<HistoryQuickPickItem>) => {
         const histItem = item.historyItem
@@ -156,7 +183,7 @@ export function activate(context: vscode.ExtensionContext) {
           context.globalState.update("urlHistory", urlHistory)
           quickPick.items = buildHistoryItems()
         } else if (button === EDIT_BTN) {
-          isHandlingButton = true
+          suppressHideResolve = true
           quickPick.hide()
           const newName = await vscode.window.showInputBox({
             prompt: "修改历史记录名称",
@@ -164,7 +191,7 @@ export function activate(context: vscode.ExtensionContext) {
             value: histItem.name || "",
             ignoreFocusOut: true,
           })
-          isHandlingButton = false
+          suppressHideResolve = false
           if (newName !== undefined) {
             histItem.name = newName.trim() || undefined
             context.globalState.update("urlHistory", urlHistory)
@@ -194,6 +221,7 @@ export function activate(context: vscode.ExtensionContext) {
   const generateCommand = vscode.commands.registerCommand(
     "generator-ts-api.generate",
     async () => {
+      log("命令触发: generator-ts-api.generate")
       const config = vscode.workspace.getConfiguration("generator-ts-api")
       const apiDocsUrl = config.get("apiDocsUrl") as string
       const apiDocsPath = config.get("apiDocsPath") as string
@@ -250,22 +278,28 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         if (outputFsPath) {
+          loadingRight.text = "$(sync~spin) 生成代码中..."
           const httpClientConfig = buildHttpClientConfig(config)
-          await generator.generate(
+          const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
+          const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+          const genResult = await generator.generate(
             apiDocs,
             framework,
             outputType,
             outputFsPath,
             outputSplit,
             namingConfig,
-            httpClientConfig
+            httpClientConfig,
+            cleanOutputDir,
+            byControllerLocalTypes
           )
           maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
-          vscode.window.showInformationMessage("API文档生成成功！")
+          vscode.window.showInformationMessage(buildSuccessMessage(genResult))
         }
       } catch (error: unknown) {
         // 显示更详尽的错误（parser 已经尝试包含 HTTP 详情）
         const errorMessage = error instanceof Error ? error.message : "未知错误"
+        logError("生成失败:", error instanceof Error ? error.stack || error.message : error)
         vscode.window.showErrorMessage(`生成API文档失败: ${errorMessage}`)
       } finally {
         // 确保状态栏被清理，并且清空全局方法名集合，避免残留影响下次生成
@@ -287,12 +321,26 @@ export function activate(context: vscode.ExtensionContext) {
   const generateFromUrlCommand = vscode.commands.registerCommand(
     "generator-ts-api.generateFromUrl",
     async () => {
+      log("命令触发: generator-ts-api.generateFromUrl")
       const selected = await showUrlHistoryQuickPick()
 
-      if (selected) {
+      if (!selected) {
+        log("未选择/输入 URL，命令已取消")
+        return
+      }
+
+      {
         let loading: vscode.StatusBarItem | undefined
         try {
+          loading = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            100
+          )
+          loading.text = "$(sync~spin) 拉取 API 文档..."
+          loading.show()
+          log("开始拉取 API 文档:", selected)
           const apiDocs = await apiParser.parseFromUrl(selected)
+          log("API 文档拉取成功，版本:", apiDocs.openapi || apiDocs.swagger || "未知")
           const generator = getGenerator(apiDocs)
           const config = vscode.workspace.getConfiguration("generator-ts-api")
           const framework = config.get("framework") as string
@@ -327,32 +375,35 @@ export function activate(context: vscode.ExtensionContext) {
             outputFsPath = outputPath?.fsPath
           }
 
-          if (outputFsPath) {
-            // 添加右侧 loading（拉取/生成）
-            loading = vscode.window.createStatusBarItem(
-              vscode.StatusBarAlignment.Right,
-              100
-            )
-            loading.text = "$(sync~spin) 生成中..."
-            loading.show()
+          if (!outputFsPath) {
+            log("未选择输出位置，命令已取消")
+          } else {
+            log("输出位置:", outputFsPath, "| 拆分模式:", outputSplit)
+            loading.text = "$(sync~spin) 生成代码中..."
             const httpClientConfig = buildHttpClientConfig(config)
-            await generator.generate(
+            const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
+            const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+            const genResult = await generator.generate(
               apiDocs,
               framework,
               outputType,
               outputFsPath,
               outputSplit,
               namingConfig,
-              httpClientConfig
+              httpClientConfig,
+              cleanOutputDir,
+              byControllerLocalTypes
             )
             maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
             // 保存成功的 URL 到历史记录（记录 Swagger 版本）
             saveUrlToHistory(selected, typeof (apiDocs.openapi || apiDocs.swagger) === "string" ? (apiDocs.openapi || apiDocs.swagger) : undefined)
-            vscode.window.showInformationMessage("API文档生成成功！")
+            log("生成完成:", genResult || "单文件模式")
+            vscode.window.showInformationMessage(buildSuccessMessage(genResult))
           }
         } catch (error: unknown) {
           const errorMessage =
             error instanceof Error ? error.message : "未知错误"
+          logError("生成失败:", error instanceof Error ? error.stack || error.message : error)
           vscode.window.showErrorMessage(`生成API文档失败: ${errorMessage}`)
         } finally {
           try {
@@ -376,6 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
   const generateFromFileCommand = vscode.commands.registerCommand(
     "generator-ts-api.generateFromFile",
     async () => {
+      log("命令触发: generator-ts-api.generateFromFile")
       const fileUri = await vscode.window.showOpenDialog({
         title: "选择API文档文件",
         filters: {
@@ -386,6 +438,12 @@ export function activate(context: vscode.ExtensionContext) {
       if (fileUri && fileUri[0]) {
         let loading: vscode.StatusBarItem | undefined
         try {
+          loading = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            100
+          )
+          loading.text = "$(sync~spin) 解析 API 文档..."
+          loading.show()
           const apiDocs = await apiParser.parseFromFile(fileUri[0].fsPath)
           const generator = getGenerator(apiDocs)
           const config = vscode.workspace.getConfiguration("generator-ts-api")
@@ -422,29 +480,28 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           if (outputFsPath) {
-            // 添加右侧 loading（生成）
-            loading = vscode.window.createStatusBarItem(
-              vscode.StatusBarAlignment.Right,
-              100
-            )
-            loading.text = "$(sync~spin) 生成中..."
-            loading.show()
+            loading.text = "$(sync~spin) 生成代码中..."
             const httpClientConfig = buildHttpClientConfig(config)
-            await generator.generate(
+            const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
+            const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+            const genResult = await generator.generate(
               apiDocs,
               framework,
               outputType,
               outputFsPath,
               outputSplit,
               namingConfig,
-              httpClientConfig
+              httpClientConfig,
+              cleanOutputDir,
+              byControllerLocalTypes
             )
             maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
-            vscode.window.showInformationMessage("API文档生成成功！")
+            vscode.window.showInformationMessage(buildSuccessMessage(genResult))
           }
         } catch (error: unknown) {
           const errorMessage =
             error instanceof Error ? error.message : "未知错误"
+          logError("生成失败:", error instanceof Error ? error.stack || error.message : error)
           vscode.window.showErrorMessage(`生成API文档失败: ${errorMessage}`)
         } finally {
           try {
@@ -469,8 +526,9 @@ export function activate(context: vscode.ExtensionContext) {
   const generateMockCommand = vscode.commands.registerCommand(
     "generator-ts-api.generateMock",
     async () => {
+      log("命令触发: generator-ts-api.generateMock")
       const config = vscode.workspace.getConfiguration("generator-ts-api")
-      const mockFormat = ((config.get("mock.outputFormat") as string) || "json") as MockOutputFormat
+      const mockFormat =((config.get("mock.outputFormat") as string) || "json") as MockOutputFormat
       const mockBaseUrl = (config.get("mock.baseUrl") as string) || ""
       const mockArrayItemCount = (config.get("mock.arrayItemCount") as number) || 2
 
@@ -572,6 +630,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : "未知错误"
+        logError("生成 Mock 数据失败:", error instanceof Error ? error.stack || error.message : error)
         vscode.window.showErrorMessage(`生成 Mock 数据失败: ${errorMessage}`)
       } finally {
         try { loading?.hide(); loading?.dispose() } catch (_) { /* ignore */ }
@@ -583,8 +642,9 @@ export function activate(context: vscode.ExtensionContext) {
   const generateRequestTemplateCommand = vscode.commands.registerCommand(
     "generator-ts-api.generateRequestTemplate",
     async () => {
+      log("命令触发: generator-ts-api.generateRequestTemplate")
       const config = vscode.workspace.getConfiguration("generator-ts-api")
-      const configMode = ((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
+      const configMode =((config.get("httpClient") as string) || "axios-wrapper") as HttpClientMode
       const configOutputType = (config.get("outputType") as string) || "ts"
 
       // ── 步骤 1：选择 HTTP 客户端模式 ──────────────────────────────────────
@@ -673,15 +733,22 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       // ── 步骤 6：生成内容并写入文件 ────────────────────────────────────────
-      const content = buildRequestTemplateContent(chosenMode, importPath, ext)
-      if (!content) {
-        vscode.window.showErrorMessage("所选模式不支持生成模板（custom 模式需手动编写）")
-        return
-      }
+      const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+      loading.text = "$(sync~spin) 生成 Request 模板文件..."
+      loading.show()
+      try {
+        const content = buildRequestTemplateContent(chosenMode, importPath, ext)
+        if (!content) {
+          vscode.window.showErrorMessage("所选模式不支持生成模板（custom 模式需手动编写）")
+          return
+        }
 
-      const outputDir = pathModule.dirname(outputFsPath)
-      if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
-      fs.writeFileSync(outputFsPath, content, "utf-8")
+        const outputDir = pathModule.dirname(outputFsPath)
+        if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
+        fs.writeFileSync(outputFsPath, content, "utf-8")
+      } finally {
+        try { loading.hide(); loading.dispose() } catch (_) { /* ignore */ }
+      }
 
       const openAction = "打开文件"
       const msg = await vscode.window.showInformationMessage(

@@ -653,3 +653,204 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
   usedNames.add(`${controllerName}.${methodName}`)
   return methodName
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 多文件拆分输出（byTag / byController）公共逻辑
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 标识符可用字符集（含字母、数字、下划线、中文），用于按完整标识符匹配 */
+const IDENTIFIER_WORD_CHARS = "A-Za-z0-9_\\u4e00-\\u9fa5"
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/** 判断 code 中是否以完整标识符形式出现 name（前后不接标识符字符） */
+export function containsIdentifier(code: string, name: string): boolean {
+  if (!name) return false
+  const re = new RegExp(
+    `(?<![${IDENTIFIER_WORD_CHARS}])${escapeRegExp(name)}(?![${IDENTIFIER_WORD_CHARS}])`
+  )
+  return re.test(code)
+}
+
+/** 从代码中提取实际用到的候选类型名（按完整标识符匹配，避免前缀重名误命中） */
+export function extractUsedTypeNames(code: string, candidates: string[]): string[] {
+  return candidates
+    .filter((name) => containsIdentifier(code, name))
+    .sort((a, b) => a.localeCompare(b))
+}
+
+/**
+ * 从种子类型出发，计算其在 typeDefs 中的传递依赖闭包。
+ * 用于 byController 本地类型模式：控制器只需带上自己用到的类型及其引用到的类型。
+ */
+export function computeTypeClosure(seed: string[], typeDefs: Map<string, string>): string[] {
+  const allNames = Array.from(typeDefs.keys())
+  const result = new Set<string>()
+  const queue = seed.filter((n) => typeDefs.has(n))
+  while (queue.length > 0) {
+    const name = queue.shift() as string
+    if (result.has(name)) continue
+    result.add(name)
+    const def = typeDefs.get(name) || ""
+    for (const candidate of allNames) {
+      if (result.has(candidate) || candidate === name) continue
+      if (containsIdentifier(def, candidate)) queue.push(candidate)
+    }
+  }
+  return Array.from(result).sort((a, b) => a.localeCompare(b))
+}
+
+/** 拆分输出生成结果统计 */
+export interface SplitOutputResult {
+  /** 生成的控制器数量 */
+  controllerCount: number
+  /** 类型定义数量 */
+  typeCount: number
+  /** 实际写入的文件数量 */
+  fileCount: number
+}
+
+/**
+ * 清理上一次拆分输出（仅删除本插件生成的目录/文件，不动用户其它文件）。
+ * 删除目标：{typesDirName}/、{controllersDirName}/、根 index.ts、根 index.js。
+ */
+export function cleanSplitOutputDir(outputDir: string, naming: NamingConfig): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require("fs")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path")
+  const targets = [
+    path.join(outputDir, naming.typesDirName),
+    path.join(outputDir, naming.controllersDirName),
+    path.join(outputDir, "index.ts"),
+    path.join(outputDir, "index.js"),
+  ]
+  for (const target of targets) {
+    try {
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { recursive: true, force: true })
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** writeControllers 入参 */
+export interface WriteControllersParams {
+  /** 输出根目录 */
+  outputDir: string
+  /** 控制器目录（通常为 outputDir/{controllersDirName}） */
+  controllersDir: string
+  /** 文件扩展名（ts / js） */
+  ext: string
+  /** 是否 byController 模式（每个控制器独立文件夹） */
+  byController: boolean
+  naming: NamingConfig
+  httpClientConfig: HttpClientConfig
+  /** controllerKey -> 该控制器的方法代码片段数组 */
+  controllers: Map<string, string[]>
+  /** 根据 controllerKey 返回控制器描述文本 */
+  describe: (controllerKey: string) => string
+  /** 全部可作为类型导入的候选类型名 */
+  typeImportCandidates: string[]
+  /**
+   * 仅 byController 模式有效：给定该控制器用到的类型名，返回应写入该控制器
+   * 文件夹内 types 文件的完整内容。提供该回调即启用「每个控制器独立类型文件」，
+   * 不提供则所有控制器共享 {typesDirName} 目录。
+   */
+  buildLocalTypesContent?: (usedTypes: string[]) => string
+}
+
+/**
+ * 写入各 Controller 文件、controllers/index 与根 index。
+ * 返回控制器数量与写入文件数量。
+ */
+export function writeControllers(
+  params: WriteControllersParams
+): { controllerCount: number; fileCount: number } {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const fs = require("fs")
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const path = require("path")
+  const {
+    outputDir,
+    controllersDir,
+    ext,
+    byController,
+    naming,
+    httpClientConfig,
+    controllers,
+    describe,
+    typeImportCandidates,
+    buildLocalTypesContent,
+  } = params
+  const localTypes = byController && typeof buildLocalTypesContent === "function"
+
+  if (!fs.existsSync(controllersDir)) fs.mkdirSync(controllersDir, { recursive: true })
+
+  // 共享类型模式下，控制器文件到 {typesDirName} 目录的相对路径
+  const sharedTypesImportPath = byController
+    ? `../../${naming.typesDirName}`
+    : `../${naming.typesDirName}`
+
+  const fileNames: string[] = []
+  let fileCount = 0
+
+  for (const [controllerKey, methods] of controllers) {
+    const { className, fileName } = buildControllerNames(controllerKey, naming)
+    const description = describe(controllerKey)
+    const methodsCode = methods.join("\n\n")
+    const importLine = buildImportSnippet(httpClientConfig)
+
+    const usedTypes =
+      ext === "ts"
+        ? extractUsedTypeNames(methodsCode, typeImportCandidates).filter((n) => n !== "RequestConfig")
+        : []
+    const typesImportPath = localTypes ? "./types" : sharedTypesImportPath
+    const typeImportLine =
+      usedTypes.length > 0
+        ? `import type { ${usedTypes.join(", ")} } from "${typesImportPath}"`
+        : ""
+
+    const controllerCode =
+      [importLine, typeImportLine].filter(Boolean).join("\n\n") +
+      ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
+      `/**\n * ${description}\n */\n` +
+      `export class ${className} {\n${methodsCode}\n}\n`
+
+    if (byController) {
+      // 每个 Controller 独立文件夹：{controllersDir}/{fileName}/index.{ext}
+      const controllerSubDir = path.join(controllersDir, fileName)
+      if (!fs.existsSync(controllerSubDir)) fs.mkdirSync(controllerSubDir, { recursive: true })
+      fs.writeFileSync(path.join(controllerSubDir, `index.${ext}`), controllerCode, "utf-8")
+      fileCount++
+      if (localTypes) {
+        const localTypesContent = (buildLocalTypesContent as (u: string[]) => string)(usedTypes)
+        fs.writeFileSync(path.join(controllerSubDir, `types.${ext}`), localTypesContent, "utf-8")
+        fileCount++
+      }
+    } else {
+      fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
+      fileCount++
+    }
+    fileNames.push(fileName)
+  }
+
+  // {controllersDir}/index.{ext}
+  const controllersIndexCode = fileNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
+  fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
+  fileCount++
+
+  // 根 index.{ext}：本地类型模式下类型不再统一导出，仅导出控制器
+  const rootExports = [`export * from "./${naming.controllersDirName}"`]
+  if (!localTypes) {
+    rootExports.unshift(`export * from "./${naming.typesDirName}"`)
+  }
+  fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootExports.join("\n") + "\n", "utf-8")
+  fileCount++
+
+  return { controllerCount: fileNames.length, fileCount }
+}

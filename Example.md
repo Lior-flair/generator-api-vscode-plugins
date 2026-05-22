@@ -272,6 +272,85 @@ output/
 
 ---
 
+## 12b) 输出策略：byController（按控制器拆分为文件夹）
+
+适合：单个控制器接口较多，希望每个控制器独占一个文件夹、便于后续在其内部继续扩展。
+
+```jsonc
+{
+  "generator-ts-api.outputSplit": "byController",
+  "generator-ts-api.naming.typesDirName": "types",
+  "generator-ts-api.naming.controllersDirName": "controllers"
+}
+```
+
+示例输出结构：
+
+```text
+output/
+  types/
+    index.ts
+  controllers/
+    用户/
+      index.ts
+    订单/
+      index.ts
+    index.ts
+  index.ts
+```
+
+与 `byTag` 的区别：`byTag` 下每个控制器是一个扁平文件（`controllers/用户.ts`），`byController` 下每个控制器是一个文件夹（`controllers/用户/index.ts`）。
+
+---
+
+## 12c) byController + 每个控制器独立类型文件（`byController.localTypes`）
+
+适合：希望每个控制器文件夹完全自成一体、可整体迁移或独立维护。
+
+```jsonc
+{
+  "generator-ts-api.outputSplit": "byController",
+  "generator-ts-api.byController.localTypes": true
+}
+```
+
+启用后不再生成共享 `types/` 目录，而是在每个控制器文件夹内生成 `types.ts`，仅包含该控制器用到的类型及其传递依赖：
+
+```text
+output/
+  controllers/
+    用户/
+      index.ts      ← import type { User, Page } from "./types"
+      types.ts      ← 仅含 用户控制器 用到的类型
+    订单/
+      index.ts
+      types.ts
+    index.ts
+  index.ts
+```
+
+> 仅 `byController` 模式生效；`single` / `byTag` 模式下该配置被忽略。
+
+---
+
+## 12d) 生成前清空旧输出（`cleanOutputDir`）
+
+适合：接口会增删，希望每次生成都是干净结果，不残留已删除接口的旧文件。
+
+```jsonc
+{
+  "generator-ts-api.outputSplit": "byTag",
+  "generator-ts-api.cleanOutputDir": true
+}
+```
+
+说明：
+- 仅 `byTag` / `byController` 模式生效。
+- 生成前会删除输出目录下由本插件生成的 类型目录、控制器目录 及根 `index` 文件。
+- 只删除插件自己生成的目标，不会影响输出目录中的其它文件。
+
+---
+
 ## 13) 生成 request.ts 样板（随 API 代码自动生成）
 
 适合：新项目快速补齐请求拦截器骨架，每次生成 API 时自动写入。
@@ -428,6 +507,31 @@ export default fetchRequest
 
 说明：
 - 文档包含 `openapi: "3.x"` 时会自动走 V3 生成器。
+
+---
+
+## 15b) URL 自动拼接常见文档路径
+
+适合：只想填服务地址、懒得记完整文档路径。
+
+```jsonc
+{
+  "generator-ts-api.apiDocsUrl": "http://localhost:8080"
+}
+```
+
+说明：
+- 填写的 URL 若不像文档端点（不含 `api-docs` / `swagger*.json` / `openapi*.json`），插件会依次尝试拼接常见路径：
+
+  ```
+  /v3/api-docs   /v2/api-docs   /openapi.json
+  /swagger.json  /api-docs      /swagger/v1/swagger.json
+  ```
+
+- 也支持带上下文路径的基础地址，如 `http://host:8080/vmoto-admin-api`，会自动尝试其下的 `/v3/api-docs` 等。
+- 逐个请求并校验返回内容确为有效文档，命中第一个有效地址即用。
+- 若填的已是完整文档地址（含 `api-docs` 等关键字），则只请求该地址，不会多发请求。
+- 版本（v2 / v3）由返回文档的 `openapi` / `swagger` 字段自动识别，与拼接逻辑无关。
 
 ---
 
@@ -693,11 +797,15 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 
 - 生成类型不符合预期：检查 `compatibilityVersion` 与 `typeMapping.formatMap`。
 - 还是旧导入风格：检查 `httpClient` 是否仍是 `axios-wrapper`。
-- 没拆分文件：检查 `outputSplit` 是否为 `byTag`。
+- 没拆分文件：检查 `outputSplit` 是否为 `byTag` 或 `byController`。
+- 想每个控制器独占文件夹：用 `outputSplit: "byController"`；想让文件夹内自带类型再开 `byController.localTypes`。
+- 生成结果残留已删除接口的旧文件：开启 `cleanOutputDir`，生成前自动清理插件生成的目录。
 - 没生成 `request.ts`（随 API 代码）：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
 - 想单独生成 request 文件：使用命令面板执行 `生成封装Request模板文件`，可选择模式和保存位置，已存在文件会提示确认覆盖。
 - 方法名含特殊符号或编译报错：检查 `naming.methodNameCasing`，默认模式会自动将特殊符号替换为 `_`。
 - import 语句不符合预期：启用 `directReplacementRequestImportPath` 并在 `requestImportPath` 中填写完整 import 语句。
+- 填了 URL 却没找到文档：可只填服务基础地址（如 `http://host:8080`），插件会自动尝试 `/v3/api-docs` 等常见路径；具体尝试过程见「调试控制台」。
+- 命令无响应、无 loading 也无报错：打开 VS Code「调试控制台」查看 `[generator-ts-api]` 日志定位（命令触发、URL 候选、错误栈均会打印）。
 
 ---
 

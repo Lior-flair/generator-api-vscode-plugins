@@ -2,10 +2,11 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV3 } from "openapi-types"
 import {
-  buildControllerNames,
   buildImportSnippet,
   buildMethodBody,
   buildUniqueMethodName,
+  cleanSplitOutputDir,
+  computeTypeClosure,
   DEFAULT_HTTP_CLIENT_CONFIG,
   DEFAULT_NAMING,
   type HttpClientConfig,
@@ -13,7 +14,9 @@ import {
   normalizeIdentifierName,
   resolveMappedScalarType,
   sanitizeName,
+  type SplitOutputResult,
   toPascalCase,
+  writeControllers,
 } from "./generatorCommon"
 
 export class ApiGenerator {
@@ -38,8 +41,10 @@ export class ApiGenerator {
     outputPath: string,
     outputSplit: string = "single",
     namingConfig: NamingConfig = DEFAULT_NAMING,
-    httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG
-  ): Promise<void> {
+    httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG,
+    cleanOutputDir: boolean = false,
+    byControllerLocalTypes: boolean = false
+  ): Promise<SplitOutputResult | void> {
     try {
       // 验证API文档
       if (!this.isValidApiDoc(apiDocs)) {
@@ -61,7 +66,16 @@ export class ApiGenerator {
 
       if (outputSplit === "byTag" || outputSplit === "byController") {
         // 按 Tag / Controller 拆分多文件输出
-        this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit === "byController")
+        return this.generateBySplit(
+          apiDocs,
+          framework,
+          outputType,
+          outputPath,
+          namingConfig,
+          outputSplit === "byController",
+          cleanOutputDir,
+          byControllerLocalTypes
+        )
       } else {
         // 生成代码（单文件）
         const code = this.generateCode(apiDocs, framework, outputType)
@@ -98,34 +112,50 @@ export class ApiGenerator {
     outputType: string,
     outputDir: string,
     naming: NamingConfig = DEFAULT_NAMING,
-    byController: boolean = false
-  ): void {
+    byController: boolean = false,
+    cleanOutputDir: boolean = false,
+    byControllerLocalTypes: boolean = false
+  ): SplitOutputResult {
     const ext = outputType === "js" ? "js" : "ts"
+    // 是否启用「每个控制器独立类型文件」（仅 byController 模式有效）
+    const useLocalTypes = byController && byControllerLocalTypes
 
-    // ── 子目录路径 ────────────────────────────────────────────────
-    const typesDir = path.join(outputDir, naming.typesDirName)
-    const controllersDir = path.join(outputDir, naming.controllersDirName)
-    ;[outputDir, typesDir, controllersDir].forEach((d) => {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
-    })
+    // ── 清理旧输出（可选）并确保根目录存在 ────────────────────────
+    if (cleanOutputDir) cleanSplitOutputDir(outputDir, naming)
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
 
-    // ── 1. 收集类型定义 → {typesDirName}/index.{ext} ──────────────
+    // ── 1. 收集类型定义（同时建立 类型名 → 定义代码 映射）─────────
     const types: string[] = []
+    const typeDefMap: Map<string, string> = new Map()
     if (apiDocs.components?.schemas) {
       for (const [name, schema] of Object.entries(apiDocs.components.schemas)) {
         if (this.isSchemaObject(schema) && (schema as any).type === "object") {
-          types.push(this.generateTypeDefinition(this.normalizeTypeIdentifier(name), schema as any, apiDocs))
+          const normalizedName = this.normalizeTypeIdentifier(name)
+          const def = this.generateTypeDefinition(normalizedName, schema as any, apiDocs)
+          types.push(def)
+          typeDefMap.set(normalizedName, def)
         }
       }
     }
+    // 枚举定义（在 generateTypeDefinition 过程中注册）
+    for (const [enumName, values] of this.enumDefs) {
+      typeDefMap.set(enumName, this.buildSingleEnumCode(enumName, values))
+    }
     const enumDefsCode = this.buildEnumDefsCode()
-    const typesCode =
-      `// 生成时间: ${new Date().toISOString()}\n\n` +
-      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
-      `// 类型定义\n${types.join("\n\n")}\n`
-    fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+    const typeCount = typeDefMap.size
 
-    // ── 2. 按 Tag 分组生成 Controller 方法 ───────────────────────
+    // ── 2. 共享类型文件（本地类型模式下跳过）──────────────────────
+    if (!useLocalTypes) {
+      const typesDir = path.join(outputDir, naming.typesDirName)
+      if (!fs.existsSync(typesDir)) fs.mkdirSync(typesDir, { recursive: true })
+      const typesCode =
+        `// 生成时间: ${new Date().toISOString()}\n\n` +
+        (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
+        `// 类型定义\n${types.join("\n\n")}\n`
+      fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+    }
+
+    // ── 3. 按 Tag 分组生成 Controller 方法 ───────────────────────
     const controllers: Map<string, string[]> = new Map()
     for (const [p, pathItem] of Object.entries(apiDocs.paths)) {
       if (pathItem) {
@@ -145,53 +175,40 @@ export class ApiGenerator {
     }
 
     const typeImportCandidates = Array.from(new Set(this.typeNames))
+    const describe = (controllerKey: string): string =>
+      (apiDocs.tags || []).find((tag: any) =>
+        tag.name === controllerKey || this.sanitizeName(tag.name) === controllerKey
+      )?.description || ""
 
-    // ── 3. 写入各 Controller 文件 ─────────────────────────────────
-    // byController 模式下类型目录相对路径多一层（controllers/{Tag}/index）
-    const typesImportPath = byController
-      ? `../../${naming.typesDirName}`
-      : `../${naming.typesDirName}`
-    const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
-    for (const [controllerKey, methods] of controllers) {
-      const { className, fileName } = buildControllerNames(controllerKey, naming)
+    // 本地类型模式：为每个控制器生成只含其用到类型（含传递依赖）的 types 文件
+    const buildLocalTypesContent = useLocalTypes
+      ? (usedTypes: string[]): string => {
+          const closure = computeTypeClosure(usedTypes, typeDefMap)
+          const body = closure.map((n) => typeDefMap.get(n)).filter(Boolean).join("\n\n")
+          return `// 生成时间: ${new Date().toISOString()}\n\n` + (body ? `${body}\n` : "")
+        }
+      : undefined
 
-      const description =
-        (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
-          this.sanitizeName(tag.name) === controllerKey)?.description || ""
-      const methodsCode = methods.join("\n\n")
-      const importLine = buildImportSnippet(this.httpClientConfig)
-      const typeImportLine = ext === "ts"
-        ? (() => {
-            const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
-              .filter((name) => name !== "RequestConfig")
-            if (usedTypes.length === 0) return ""
-            // 按需引入：只导入当前控制器实际用到的类型
-            return `import type { ${usedTypes.join(", ")} } from "${typesImportPath}"`
-          })()
-        : ""
-      const controllerCode =
-        [importLine, typeImportLine].filter(Boolean).join("\n\n") +
-        ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
-        `/**\n * ${description}\n */\n` +
-        `export class ${className} {\n${methodsCode}\n}\n`
-      if (byController) {
-        // 每个 Controller 独立文件夹：controllers/{fileName}/index.{ext}
-        const controllerSubDir = path.join(controllersDir, fileName)
-        if (!fs.existsSync(controllerSubDir)) fs.mkdirSync(controllerSubDir, { recursive: true })
-        fs.writeFileSync(path.join(controllerSubDir, `index.${ext}`), controllerCode, "utf-8")
-      } else {
-        fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
-      }
-      fileNames.push(fileName)
+    // ── 4. 写入控制器文件与各级 index ─────────────────────────────
+    const { controllerCount, fileCount } = writeControllers({
+      outputDir,
+      controllersDir: path.join(outputDir, naming.controllersDirName),
+      ext,
+      byController,
+      naming,
+      httpClientConfig: this.httpClientConfig,
+      controllers,
+      describe,
+      typeImportCandidates,
+      buildLocalTypesContent,
+    })
+
+    return {
+      controllerCount,
+      typeCount,
+      // 共享类型模式下额外写了一个 {typesDirName}/index 文件
+      fileCount: fileCount + (useLocalTypes ? 0 : 1),
     }
-
-    // controllers/{controllersDirName}/index.{ext}
-    const controllersIndexCode = fileNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
-    fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
-
-    // ── 4. 根 index 文件 ──────────────────────────────────────────
-    const rootIndexCode = `export * from "./${naming.typesDirName}"\nexport * from "./${naming.controllersDirName}"\n`
-    fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 
   private isValidApiDoc(doc: any): boolean {
@@ -211,17 +228,19 @@ export class ApiGenerator {
     }
   }
 
+  private buildSingleEnumCode(name: string, values: string[]): string {
+    const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
+    return (
+      `export const ${name} = {\n${entries},\n} as const\n` +
+      `export type ${name} = typeof ${name}[keyof typeof ${name}]`
+    )
+  }
+
   private buildEnumDefsCode(): string {
     if (this.enumDefs.size === 0) return ""
-    const parts: string[] = []
-    for (const [name, values] of this.enumDefs) {
-      const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
-      parts.push(
-        `export const ${name} = {\n${entries},\n} as const\n` +
-        `export type ${name} = typeof ${name}[keyof typeof ${name}]`
-      )
-    }
-    return parts.join("\n\n")
+    return Array.from(this.enumDefs)
+      .map(([name, values]) => this.buildSingleEnumCode(name, values))
+      .join("\n\n")
   }
 
   private generateCode(
@@ -309,19 +328,6 @@ ${methods.join("\n\n")}
 
   private normalizeTypeIdentifier(name: string): string {
     return normalizeIdentifierName(name, this.naming.methodNameCasing)
-  }
-
-  private extractUsedTypeNames(code: string, candidates: string[]): string[] {
-    // 按完整标识符匹配，避免 User 误命中 UserDetail 之类的前缀重名类型
-    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const wordChar = "A-Za-z0-9_\\u4e00-\\u9fa5"
-    return candidates
-      .filter((name) => {
-        if (!name) return false
-        const re = new RegExp(`(?<![${wordChar}])${escapeRegExp(name)}(?![${wordChar}])`)
-        return re.test(code)
-      })
-      .sort((a, b) => a.localeCompare(b))
   }
 
   private generateTypeDefinition(

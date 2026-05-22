@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -137,6 +137,16 @@
             "kebab-case：连字符，如 create-payment-intent"
           ],
           "description": "生成的接口请求方法名的命名风格，三种拆分模式下均生效"
+        },
+        "generator-ts-api.cleanOutputDir": {
+          "type": "boolean",
+          "default": false,
+          "description": "【仅 byTag / byController 模式生效】生成前是否清空上一次的输出。为 true 时会删除输出目录下由本插件生成的 类型目录、控制器目录 及根 index 文件，避免接口删除后残留旧文件。不会影响输出目录中的其它文件"
+        },
+        "generator-ts-api.byController.localTypes": {
+          "type": "boolean",
+          "default": false,
+          "description": "【仅 byController 模式生效】为 true 时，不再生成共享的类型目录，而是在每个控制器文件夹内单独生成一个 types 文件，仅包含该控制器用到的类型及其传递依赖，使每个控制器文件夹自成一体"
         },
         "generator-ts-api.httpClient": {
           "type": "string",

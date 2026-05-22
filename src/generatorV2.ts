@@ -2,10 +2,11 @@ import * as fs from "fs"
 import * as path from "path"
 import { OpenAPIV2 } from "openapi-types"
 import {
-  buildControllerNames,
   buildImportSnippet,
   buildMethodBody,
   buildUniqueMethodName,
+  cleanSplitOutputDir,
+  computeTypeClosure,
   DEFAULT_HTTP_CLIENT_CONFIG,
   DEFAULT_NAMING,
   type HttpClientConfig,
@@ -14,7 +15,9 @@ import {
   normalizeTypeExpression,
   resolveMappedScalarType,
   sanitizeName,
+  type SplitOutputResult,
   toPascalCase,
+  writeControllers,
 } from "./generatorCommon"
 
 export class ApiGenerator {
@@ -42,7 +45,7 @@ export class ApiGenerator {
   /** 当前生成任务的命名配置 */
   private naming: NamingConfig = DEFAULT_NAMING
 
-  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG): Promise<void> {
+  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG, cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false): Promise<SplitOutputResult | void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
@@ -53,7 +56,7 @@ export class ApiGenerator {
 
       if (outputSplit === "byTag" || outputSplit === "byController") {
         // 按 Tag / Controller 拆分多文件输出
-        this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit === "byController")
+        return this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit === "byController", cleanOutputDir, byControllerLocalTypes)
       } else {
         const code = this.generateCode(apiDocs)
 
@@ -79,8 +82,10 @@ export class ApiGenerator {
    *  byController 模式（byController = true）：
    *   - {controllersDirName}/{Tag}/index.{ext}  每个 Controller 独立文件夹
    */
-  private generateBySplit(apiDocs: any, framework: string, outputType: string, outputDir: string, naming: NamingConfig = DEFAULT_NAMING, byController: boolean = false): void {
+  private generateBySplit(apiDocs: any, framework: string, outputType: string, outputDir: string, naming: NamingConfig = DEFAULT_NAMING, byController: boolean = false, cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false): SplitOutputResult {
     const ext = outputType === "js" ? "js" : "ts"
+    // 是否启用「每个控制器独立类型文件」（仅 byController 模式有效）
+    const useLocalTypes = byController && byControllerLocalTypes
 
     // 重置状态，与 generateCode 的配置一致
     this.genericTypes = []
@@ -115,23 +120,37 @@ export class ApiGenerator {
     const types = this.generateInterfaceType(apiDocs)
     const { controllers, paramTypes } = this.generateController(apiDocs)
 
-    // ── 子目录路径 ─────────────────────────────────────────────────
-    const typesDir = path.join(outputDir, naming.typesDirName)
-    const controllersDir = path.join(outputDir, naming.controllersDirName)
-    ;[typesDir, controllersDir].forEach((d) => {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true })
-    })
+    // ── 清理旧输出（可选）并确保根目录存在 ────────────────────────
+    if (cleanOutputDir) cleanSplitOutputDir(outputDir, naming)
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
 
-    // ── 1. 写入 {typesDirName}/index.{ext} ────────────────────────
+    // ── 建立 类型名 → 定义代码 映射（供本地类型模式做依赖闭包）──
     const enumDefsCode = this.buildEnumDefsCode()
-    const typesCode =
-      `// 生成时间: ${new Date().toISOString()}\n\n` +
-      `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
-      genericTypesStr.join("\n\n") + "\n\n" +
-      (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
-      types.join("\n\n") + "\n\n" +
-      paramTypes.join("\n\n") + "\n"
-    fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+    const typeDefMap: Map<string, string> = new Map()
+    typeDefMap.set("List", "export type List<T> = Array<T>")
+    typeDefMap.set("Collection", "export type Collection<T> = Array<T>")
+    for (const def of [...genericTypesStr, ...types, ...paramTypes]) {
+      const matched = def.match(/export\s+(?:interface|type|const)\s+([A-Za-z0-9_一-龥]+)/)
+      if (matched) typeDefMap.set(matched[1], def)
+    }
+    for (const [enumName, values] of this.enumDefs) {
+      typeDefMap.set(enumName, this.buildSingleEnumCode(enumName, values))
+    }
+    const typeCount = typeDefMap.size
+
+    // ── 1. 共享类型文件（本地类型模式下跳过）──────────────────────
+    if (!useLocalTypes) {
+      const typesDir = path.join(outputDir, naming.typesDirName)
+      if (!fs.existsSync(typesDir)) fs.mkdirSync(typesDir, { recursive: true })
+      const typesCode =
+        `// 生成时间: ${new Date().toISOString()}\n\n` +
+        `export type List<T> = Array<T>\nexport type Collection<T> = Array<T>\n` +
+        genericTypesStr.join("\n\n") + "\n\n" +
+        (enumDefsCode ? `// 枚举类型\n${enumDefsCode}\n\n` : "") +
+        types.join("\n\n") + "\n\n" +
+        paramTypes.join("\n\n") + "\n"
+      fs.writeFileSync(path.join(typesDir, `index.${ext}`), typesCode, "utf-8")
+    }
 
     const paramTypeNames = paramTypes
       .map((typeDef) => typeDef.match(/export interface\s+([^\s<{]+)/)?.[1])
@@ -144,51 +163,40 @@ export class ApiGenerator {
       ...paramTypeNames,
     ]))
 
-    // ── 2. 写入各 Controller 文件 ─────────────────────────────────
-    // byController 模式下类型目录相对路径多一层（controllers/{Tag}/index）
-    const typesImportPath = byController
-      ? `../../${naming.typesDirName}`
-      : `../${naming.typesDirName}`
-    const fileNames: string[] = []
-    for (const [controllerKey, methods] of controllers) {
-      const { className, fileName } = buildControllerNames(controllerKey, naming)
-
-      const description = (apiDocs.tags || []).find((t: any) =>
+    const describe = (controllerKey: string): string =>
+      (apiDocs.tags || []).find((t: any) =>
         t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
       )?.description || ""
-      const methodsCode = methods.join("\n\n")
-      const importLine = buildImportSnippet(this.httpClientConfig)
-      const typeImportLine = ext === "ts"
-        ? (() => {
-            const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
-            if (usedTypes.length === 0) return ""
-            // 按需引入：只导入当前控制器实际用到的类型
-            return `import type { ${usedTypes.join(", ")} } from "${typesImportPath}"`
-          })()
-        : ""
-      const controllerCode =
-        [importLine, typeImportLine].filter(Boolean).join("\n\n") +
-        ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
-        `/**\n * ${description}\n */\n` +
-        `export class ${className} {\n${methodsCode}\n}\n`
-      if (byController) {
-        // 每个 Controller 独立文件夹：controllers/{fileName}/index.{ext}
-        const controllerSubDir = path.join(controllersDir, fileName)
-        if (!fs.existsSync(controllerSubDir)) fs.mkdirSync(controllerSubDir, { recursive: true })
-        fs.writeFileSync(path.join(controllerSubDir, `index.${ext}`), controllerCode, "utf-8")
-      } else {
-        fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
-      }
-      fileNames.push(fileName)
+
+    // 本地类型模式：为每个控制器生成只含其用到类型（含传递依赖）的 types 文件
+    const buildLocalTypesContent = useLocalTypes
+      ? (usedTypes: string[]): string => {
+          const closure = computeTypeClosure(usedTypes, typeDefMap)
+          const body = closure.map((n) => typeDefMap.get(n)).filter(Boolean).join("\n\n")
+          return `// 生成时间: ${new Date().toISOString()}\n\n` + (body ? `${body}\n` : "")
+        }
+      : undefined
+
+    // ── 2. 写入控制器文件与各级 index ─────────────────────────────
+    const { controllerCount, fileCount } = writeControllers({
+      outputDir,
+      controllersDir: path.join(outputDir, naming.controllersDirName),
+      ext,
+      byController,
+      naming,
+      httpClientConfig: this.httpClientConfig,
+      controllers,
+      describe,
+      typeImportCandidates,
+      buildLocalTypesContent,
+    })
+
+    return {
+      controllerCount,
+      typeCount,
+      // 共享类型模式下额外写了一个 {typesDirName}/index 文件
+      fileCount: fileCount + (useLocalTypes ? 0 : 1),
     }
-
-    // controllers/index.{ext}
-    const controllersIndexCode = fileNames.map((n) => `export * from "./${n}"`).join("\n") + "\n"
-    fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
-
-    // ── 3. 根 index.{ext} ──────────────────────────────────────────
-    const rootIndexCode = `export * from "./${naming.typesDirName}"\nexport * from "./${naming.controllersDirName}"\n`
-    fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootIndexCode, "utf-8")
   }
 
   private isValidApiDoc(doc: any): boolean {
@@ -210,17 +218,19 @@ export class ApiGenerator {
     }
   }
 
+  private buildSingleEnumCode(name: string, values: string[]): string {
+    const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
+    return (
+      `export const ${name} = {\n${entries},\n} as const\n` +
+      `export type ${name} = typeof ${name}[keyof typeof ${name}]`
+    )
+  }
+
   private buildEnumDefsCode(): string {
     if (this.enumDefs.size === 0) return ""
-    const parts: string[] = []
-    for (const [name, values] of this.enumDefs) {
-      const entries = values.map((v) => `  ${this.toConstKey(v)}: '${v}'`).join(",\n")
-      parts.push(
-        `export const ${name} = {\n${entries},\n} as const\n` +
-        `export type ${name} = typeof ${name}[keyof typeof ${name}]`
-      )
-    }
-    return parts.join("\n\n")
+    return Array.from(this.enumDefs)
+      .map(([name, values]) => this.buildSingleEnumCode(name, values))
+      .join("\n\n")
   }
 
   private sanitizeName(name: string): string {
@@ -234,20 +244,6 @@ export class ApiGenerator {
   private normalizeTypeExpr(typeExpr: string): string {
     return normalizeTypeExpression(typeExpr, this.naming.methodNameCasing)
   }
-
-  private extractUsedTypeNames(code: string, candidates: string[]): string[] {
-    // 按完整标识符匹配，避免 User 误命中 UserDetail 之类的前缀重名类型
-    const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const wordChar = "A-Za-z0-9_\\u4e00-\\u9fa5"
-    return candidates
-      .filter((name) => {
-        if (!name) return false
-        const re = new RegExp(`(?<![${wordChar}])${escapeRegExp(name)}(?![${wordChar}])`)
-        return re.test(code)
-      })
-      .sort((a, b) => a.localeCompare(b))
-  }
-
 
   private normalizeFormat(format: unknown): string | undefined {
     if (typeof format === "string") return format

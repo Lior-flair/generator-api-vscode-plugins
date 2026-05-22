@@ -2,6 +2,93 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026年5月22日
+
+#### 新增 `byController` 输出拆分模式
+
+`generator-ts-api.outputSplit` 新增第三个可选值 `byController`，在 `byTag` 基础上让每个控制器单独成一个文件夹。
+
+| 值 | 目录结构 |
+|---|---|
+| `single` | 所有接口和类型生成到一个文件 |
+| `byTag` | `types/index`、`controllers/用户.ts`、`controllers/订单.ts`、`index` |
+| `byController` | `types/index`、`controllers/用户/index`、`controllers/订单/index`、`index` |
+
+- `byTag` / `byController` 模式生成时要求选择输出**目录**，`single` 模式选择输出**文件**。
+- `controllers/index` 的 `export * from "./用户"` 对扁平文件和文件夹均可解析，两种模式共用。
+
+#### 新增「每个控制器独立类型文件」（`byController.localTypes`）
+
+新增配置 `generator-ts-api.byController.localTypes`（布尔值，默认 `false`，仅 `byController` 模式生效）。
+
+启用后不再生成共享的 `types/` 目录，而是在每个控制器文件夹内单独生成 `types.ts`，仅包含该控制器用到的类型**及其传递依赖**（通过类型定义间的标识符引用计算依赖闭包），控制器从 `./types` 按需引入，使每个控制器文件夹自成一体。
+
+#### 新增「生成前清空旧输出」开关（`cleanOutputDir`）
+
+新增配置 `generator-ts-api.cleanOutputDir`（布尔值，默认 `false`，仅 `byTag` / `byController` 模式生效）。
+
+为 `true` 时，生成前会删除输出目录下由本插件生成的 类型目录、控制器目录 及根 `index` 文件，避免接口删除后残留旧文件。仅删除插件自身生成的目标，不影响输出目录中的其它文件。
+
+#### 类型引入方式改为按需命名导入
+
+旧版行为：`byTag` 控制器文件统一用命名空间导入 `import type * as Types from "../types"`，并在方法代码中为命中的类型名加 `Types.` 前缀。
+
+新版行为：改为按需命名导入，只导入当前控制器实际用到的类型：
+
+```typescript
+// 旧
+import type * as Types from "../types"
+static getUser(...): Promise<Types.User> { ... }
+
+// 新
+import type { User } from "../types"
+static getUser(...): Promise<User> { ... }
+```
+
+同时类型使用检测改为**按完整标识符匹配**（前后不接标识符字符），避免 `User` 误命中 `UserDetail` 之类的前缀重名类型而产生多余导入。
+
+#### URL 支持自动拼接常见文档路径
+
+「从 URL 生成」与配置的 `apiDocsUrl` 现在支持只填服务基础地址。若填写的 URL 不像文档端点（不含 `api-docs` / `swagger*.json` / `openapi*.json`），插件会依次尝试拼接常见路径：
+
+```
+/v3/api-docs   /v2/api-docs   /openapi.json
+/swagger.json  /api-docs      /swagger/v1/swagger.json
+```
+
+逐个请求并校验返回内容确为 OpenAPI 3.x / Swagger 2.x 文档，命中第一个有效地址即用；Basic Auth 凭证在多个候选间复用；全部失败时错误信息会带上「已尝试 N 个候选地址」与最后一次失败原因。
+
+#### 生成结果提示带数量统计
+
+`byTag` / `byController` 生成成功后的提示由「API文档生成成功！」改为带统计：
+
+> API 代码生成成功！共 N 个控制器、M 个类型，写入 K 个文件
+
+#### Bug 修复
+
+- **修复「输入新URL」始终无效**：`从 URL 生成` 命令中，选择「输入新URL」后弹出输入框，但 QuickPick 隐藏时触发的 `onDidHide` 会抢先 `resolve(undefined)`，导致输入的 URL 被丢弃 —— 表现为输入 URL 后既无 loading 也无错误提示。已通过 `suppressHideResolve` 标志修复。
+- **修复从 URL 拉取 YAML 文档失败**：解析时对响应数据无条件 `JSON.stringify`，使 YAML 文本被包成字符串而永不被解析。改为按响应数据类型分支处理。
+
+#### loading 提示统一与补全
+
+- `从 URL 生成`：原本拉取 URL 这段最耗时的过程没有 loading，现改为命令一开始即显示「拉取 API 文档...」，生成阶段更新为「生成代码中...」。
+- `从本地文件生成`：loading 提前到解析文件之前。
+- `生成 API 代码`：生成阶段文案更新为「生成代码中...」。
+- `生成 Request 模板文件`：补充了生成阶段的 loading 提示。
+
+#### 调试日志
+
+各命令入口、关键步骤与错误现在会输出到 VS Code「调试控制台」（`console.log` / `console.error`，统一带 `[generator-ts-api]` 前缀），URL 解析会打印候选地址列表与每个候选的请求结果，便于排查问题。
+
+#### 技术变更
+
+- `generatorCommon.ts` 新增 `extractUsedTypeNames`、`containsIdentifier`、`computeTypeClosure`、`cleanSplitOutputDir`、`writeControllers` 及 `SplitOutputResult` 接口
+- V2 / V3 生成器抽取拆分写文件的重复逻辑到 `generatorCommon`，`generateByTag` 统一为 `generateBySplit`
+- `generate()` 新增可选参数 `cleanOutputDir`、`byControllerLocalTypes`，并返回 `SplitOutputResult`
+- `parser.ts` `parseFromUrl` 重构为多候选地址尝试
+- `naming.controllersDirName` 默认值由 `modules` 修正为 `controllers`，与代码 fallback 保持一致
+- `package.json` 所有命令标题与配置项描述重写，更清晰
+
 ## [0.1.5] - 2026年4月20日
 
 #### 添加字符串字段枚举类型生成支持

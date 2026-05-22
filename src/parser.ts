@@ -23,12 +23,16 @@ export class ApiParser {
     let authHeader: string | undefined;
     let lastErrorMessage = '未知错误';
 
+    console.log('[generator-ts-api] 待尝试的候选地址:', candidates);
     for (const candidate of candidates) {
       try {
+        console.log('[generator-ts-api] 正在请求:', candidate);
         const doc = await this.fetchAndParse(candidate, authHeader);
         if (this.looksLikeApiDoc(doc)) {
+          console.log('[generator-ts-api] 命中有效 API 文档:', candidate);
           return doc;
         }
+        console.warn('[generator-ts-api] 内容非有效文档:', candidate);
         lastErrorMessage = `${candidate} 返回的内容不是有效的 OpenAPI/Swagger 文档`;
       } catch (error: unknown) {
         if (error instanceof UserCancelledError) {
@@ -66,10 +70,12 @@ export class ApiParser {
         } else {
           lastErrorMessage = error instanceof Error ? error.message : '未知错误';
         }
+        console.warn('[generator-ts-api] 候选地址请求失败:', candidate, '->', lastErrorMessage);
       }
     }
 
     const triedNote = candidates.length > 1 ? `（已尝试 ${candidates.length} 个候选地址）` : '';
+    console.error('[generator-ts-api] 所有候选地址均失败:', lastErrorMessage);
     throw new Error(`从URL解析API文档失败${triedNote}: ${lastErrorMessage}`);
   }
 
@@ -96,7 +102,12 @@ export class ApiParser {
   private async fetchAndParse(url: string, authHeader?: string): Promise<any> {
     const config = authHeader ? { headers: { Authorization: authHeader } } : undefined;
     const response = await axios.get(url, config);
-    return this.parseContent(JSON.stringify(response.data));
+    const data = response.data;
+    // axios 已自动解析的 JSON 直接返回；字符串（如 YAML / 未解析的 JSON）交给 parseContent
+    if (data && typeof data === 'object') {
+      return data;
+    }
+    return this.parseContent(String(data ?? ''));
   }
 
   /** 判断解析结果是否为有效的 OpenAPI 3.x / Swagger 2.x 文档 */
