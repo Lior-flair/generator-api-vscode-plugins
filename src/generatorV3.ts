@@ -59,9 +59,9 @@ export class ApiGenerator {
       // 初始化类型名称
       this.initializeTypeNames(apiDocs)
 
-      if (outputSplit === "byTag") {
-        // 按 Tag 拆分多文件输出
-        this.generateByTag(apiDocs, framework, outputType, outputPath, namingConfig)
+      if (outputSplit === "byTag" || outputSplit === "byController") {
+        // 按 Tag / Controller 拆分多文件输出
+        this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit === "byController")
       } else {
         // 生成代码（单文件）
         const code = this.generateCode(apiDocs, framework, outputType)
@@ -82,17 +82,23 @@ export class ApiGenerator {
   }
 
   /**
-   * 按 Tag 拆分输出：
-   *  - types.{ext}   所有类型定义
-   *  - {Tag}.{ext}   每个 Tag 对应的 Controller 类
-   *  - index.{ext}   统一 re-export
+   * 按 Tag / Controller 拆分输出：
+   *  byTag 模式：
+   *   - {typesDirName}/index.{ext}        所有类型定义
+   *   - {controllersDirName}/{Tag}.{ext}  每个 Tag 对应的 Controller 类
+   *   - index.{ext}                       统一 re-export
+   *  byController 模式（byController = true）：
+   *   - {typesDirName}/index.{ext}                  所有类型定义
+   *   - {controllersDirName}/{Tag}/index.{ext}      每个 Controller 独立文件夹
+   *   - index.{ext}                                 统一 re-export
    */
-  private generateByTag(
+  private generateBySplit(
     apiDocs: any,
     framework: string,
     outputType: string,
     outputDir: string,
-    naming: NamingConfig = DEFAULT_NAMING
+    naming: NamingConfig = DEFAULT_NAMING,
+    byController: boolean = false
   ): void {
     const ext = outputType === "js" ? "js" : "ts"
 
@@ -141,6 +147,10 @@ export class ApiGenerator {
     const typeImportCandidates = Array.from(new Set(this.typeNames))
 
     // ── 3. 写入各 Controller 文件 ─────────────────────────────────
+    // byController 模式下类型目录相对路径多一层（controllers/{Tag}/index）
+    const typesImportPath = byController
+      ? `../../${naming.typesDirName}`
+      : `../${naming.typesDirName}`
     const fileNames: string[] = [] // 实际写入的文件名（不含后缀）
     for (const [controllerKey, methods] of controllers) {
       const { className, fileName } = buildControllerNames(controllerKey, naming)
@@ -148,15 +158,15 @@ export class ApiGenerator {
       const description =
         (apiDocs.tags || []).find((tag: any) => tag.name === controllerKey ||
           this.sanitizeName(tag.name) === controllerKey)?.description || ""
-      let methodsCode = methods.join("\n\n")
+      const methodsCode = methods.join("\n\n")
       const importLine = buildImportSnippet(this.httpClientConfig)
       const typeImportLine = ext === "ts"
         ? (() => {
             const usedTypes = this.extractUsedTypeNames(methodsCode, typeImportCandidates)
               .filter((name) => name !== "RequestConfig")
             if (usedTypes.length === 0) return ""
-            methodsCode = this.prefixTypeReferences(methodsCode, usedTypes)
-            return `import type * as Types from "../${naming.typesDirName}"`
+            // 按需引入：只导入当前控制器实际用到的类型
+            return `import type { ${usedTypes.join(", ")} } from "${typesImportPath}"`
           })()
         : ""
       const controllerCode =
@@ -164,7 +174,14 @@ export class ApiGenerator {
         ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
         `/**\n * ${description}\n */\n` +
         `export class ${className} {\n${methodsCode}\n}\n`
-      fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
+      if (byController) {
+        // 每个 Controller 独立文件夹：controllers/{fileName}/index.{ext}
+        const controllerSubDir = path.join(controllersDir, fileName)
+        if (!fs.existsSync(controllerSubDir)) fs.mkdirSync(controllerSubDir, { recursive: true })
+        fs.writeFileSync(path.join(controllerSubDir, `index.${ext}`), controllerCode, "utf-8")
+      } else {
+        fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
+      }
       fileNames.push(fileName)
     }
 
@@ -295,25 +312,16 @@ ${methods.join("\n\n")}
   }
 
   private extractUsedTypeNames(code: string, candidates: string[]): string[] {
-    return candidates
-      .filter((name) => code.includes(name))
-      .sort((a, b) => a.localeCompare(b))
-  }
-
-  private prefixTypeReferences(code: string, typeNames: string[]): string {
+    // 按完整标识符匹配，避免 User 误命中 UserDetail 之类的前缀重名类型
     const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    return [...typeNames]
-      .sort((a, b) => b.length - a.length)
-      .reduce((result, typeName) => {
-        const escaped = escapeRegExp(typeName)
-        const tail = `(?![A-Za-z0-9_\u4e00-\u9fa5])`
-        return result
-          .replace(new RegExp(`(:\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(<\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(\\|\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(&\\s*)(${escaped})${tail}`, "g"), "$1Types.$2")
-          .replace(new RegExp(`(,\\s*)(${escaped})${tail}(?!\\s*:)`, "g"), "$1Types.$2")
-      }, code)
+    const wordChar = "A-Za-z0-9_\\u4e00-\\u9fa5"
+    return candidates
+      .filter((name) => {
+        if (!name) return false
+        const re = new RegExp(`(?<![${wordChar}])${escapeRegExp(name)}(?![${wordChar}])`)
+        return re.test(code)
+      })
+      .sort((a, b) => a.localeCompare(b))
   }
 
   private generateTypeDefinition(

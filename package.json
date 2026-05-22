@@ -1,18 +1,16 @@
 {
   "name": "generator-ts-api",
   "displayName": "generator-ts-api",
-  "description": "从后端API文档生成前端TypeScript/JavaScript代码",
+  "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
   "version": "0.1.5",
   "publisher": "Lior",
-  "license": "MIT", 
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Lior-flair/generator-api-vscode-plugins.git"
   },
-  "publishConfig": {
-    
-  },
+  "publishConfig": {},
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -25,23 +23,23 @@
     "commands": [
       {
         "command": "generator-ts-api.generate",
-        "title": "生成api文档"
+        "title": "Generator TS API: 生成 API 代码（使用配置的 URL / 路径）"
       },
       {
         "command": "generator-ts-api.generateFromUrl",
-        "title": "从url生成api文档"
+        "title": "Generator TS API: 从 URL 生成 API 代码"
       },
       {
         "command": "generator-ts-api.generateFromFile",
-        "title": "从文件生成api文档"
+        "title": "Generator TS API: 从本地文件生成 API 代码"
       },
       {
         "command": "generator-ts-api.generateMock",
-        "title": "生成Mock数据"
+        "title": "Generator TS API: 生成 Mock 数据"
       },
       {
         "command": "generator-ts-api.generateRequestTemplate",
-        "title": "生成封装Request模板文件"
+        "title": "Generator TS API: 生成 Request 封装模板文件"
       }
     ],
     "configuration": {
@@ -55,7 +53,7 @@
             "angular"
           ],
           "default": "react",
-          "description": "目标前端框架"
+          "description": "目标前端框架，用于生成代码时的框架相关适配"
         },
         "generator-ts-api.outputType": {
           "type": "string",
@@ -64,40 +62,42 @@
             "js"
           ],
           "default": "ts",
-          "description": "输出文件类型"
+          "description": "生成代码的语言与文件类型。ts：生成带类型标注的 TypeScript（.ts）；js：生成 JavaScript（.js），不含类型定义"
         },
         "generator-ts-api.apiDocsUrl": {
           "type": "string",
           "default": "",
-          "description": "API文档URL"
+          "description": "API 文档地址，供「生成api文档」命令使用。可填写完整文档地址（如 http://host:8080/v3/api-docs），也可只填服务基础地址（如 http://host:8080），插件会自动尝试拼接 /v3/api-docs、/v2/api-docs、/openapi.json 等常见路径"
         },
         "generator-ts-api.apiDocsPath": {
           "type": "string",
           "default": "",
-          "description": "API文档本地路径"
+          "description": "API 文档本地文件路径，供「生成api文档」命令使用，支持 JSON / YAML 格式。同时填写了 apiDocsUrl 时优先使用 URL"
         },
         "generator-ts-api.outputSplit": {
           "type": "string",
           "enum": [
             "single",
-            "byTag"
+            "byTag",
+            "byController"
           ],
           "default": "single",
           "enumDescriptions": [
-            "所有 API 生成到单一文件",
-            "按 Tag（模块）拆分，每个模块生成独立文件，并自动生成 index.ts 统一导出"
+            "single：所有接口和类型生成到一个文件中",
+            "byTag：按 Tag（接口分组）拆分。类型统一放在 类型目录/index，每个 Tag 生成一个控制器文件，并生成 index 统一导出。目录结构：types/index、controllers/用户.ts、controllers/订单.ts、index",
+            "byController：在 byTag 基础上，每个控制器单独成一个文件夹。目录结构：types/index、controllers/用户/index、controllers/订单/index、index。适合单个控制器接口较多、希望后续在其文件夹内继续扩展的场景"
           ],
-          "description": "输出拆分策略：single 单文件输出，byTag 按 Tag 模块拆分为多文件"
+          "description": "输出拆分策略。single：单文件输出；byTag：按 Tag 拆分为多文件；byController：按 Controller 拆分为独立文件夹。byTag / byController 模式下生成时会要求选择一个输出『目录』，single 模式则要求选择输出『文件』"
         },
         "generator-ts-api.naming.typesDirName": {
           "type": "string",
           "default": "types",
-          "description": "byTag 模式下类型定义文件夹的名称（默认 types）"
+          "description": "【仅 byTag / byController 模式生效】存放类型定义的文件夹名称，默认 types"
         },
         "generator-ts-api.naming.controllersDirName": {
           "type": "string",
-          "default": "modules",
-          "description": "byTag 模式下请求控制器文件夹的名称（默认 modules）"
+          "default": "controllers",
+          "description": "【仅 byTag / byController 模式生效】存放接口控制器的文件夹名称，默认 controllers。byController 模式下，每个控制器会在该文件夹内再各自占用一个子文件夹"
         },
         "generator-ts-api.naming.controllerFileNameCasing": {
           "type": "string",
@@ -109,17 +109,17 @@
           ],
           "default": "default",
           "enumDescriptions": [
-            "保持 Tag 原始名称（仅进行特殊字符过滤），与旧版行为一致",
-            "大驼峰，如 UserController.ts",
-            "小驼峰，如 userController.ts",
-            "连字符，如 user-controller.ts"
+            "default：保持 Tag 原始名称，仅做特殊字符过滤，与旧版行为一致",
+            "PascalCase：大驼峰，如 UserController",
+            "camelCase：小驼峰，如 userController",
+            "kebab-case：连字符，如 user-controller"
           ],
-          "description": "byTag 模式下每个 Controller 文件名的命名风格"
+          "description": "【仅 byTag / byController 模式生效】控制器文件名（byController 模式下为子文件夹名）与类名的命名风格"
         },
         "generator-ts-api.naming.controllerClassNameSuffix": {
           "type": "string",
           "default": "",
-          "description": "byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）"
+          "description": "【仅 byTag / byController 模式生效】控制器类名与文件名的后缀。例如填 Controller，Tag「用户」会生成类 UserController；留空则为 User"
         },
         "generator-ts-api.naming.methodNameCasing": {
           "type": "string",
@@ -131,12 +131,12 @@
           ],
           "default": "default",
           "enumDescriptions": [
-            "保持生成的原始方法名（与旧版行为一致）",
-            "大驼峰，如 CreatePaymentIntent",
-            "小驼峰，如 createPaymentIntent",
-            "连字符，如 create-payment-intent"
+            "default：保持自动推导出的原始方法名，与旧版行为一致",
+            "PascalCase：大驼峰，如 CreatePaymentIntent",
+            "camelCase：小驼峰，如 createPaymentIntent",
+            "kebab-case：连字符，如 create-payment-intent"
           ],
-          "description": "生成的 Controller 方法名的命名风格"
+          "description": "生成的接口请求方法名的命名风格，三种拆分模式下均生效"
         },
         "generator-ts-api.httpClient": {
           "type": "string",
@@ -148,27 +148,27 @@
           ],
           "default": "axios-wrapper",
           "enumDescriptions": [
-            "（默认）保持原有风格：通过 getConfigs + request 包装器调用，import 路径由 requestImportPath 控制",
-            "axios 直调：生成 axios.get / axios.post 风格，import axios from '...'，方法改为 async/await",
-            "原生 fetch 直调：无需 import，生成 fetch(...).then(r => r.json()) 风格，方法改为 async/await",
-            "自定义模板：方法体由 customTemplate.templateFile 或 customTemplate.templateString 渲染"
+            "axios-wrapper（默认）：通过 getConfigs + request 包装器调用，需要配合一个封装好的 request 模块，import 路径由 requestImportPath 指定",
+            "axios：直接使用 axios，生成 axios.get / axios.post 风格代码，方法为 async/await",
+            "fetch：使用浏览器原生 fetch，无需任何 import，方法为 async/await",
+            "custom：方法体完全由自定义模板渲染，模板来自 customTemplate.templateFile 或 customTemplate.templateString"
           ],
-          "description": "生成代码使用的 HTTP 客户端模式"
+          "description": "生成代码调用接口时使用的 HTTP 客户端模式，决定每个请求方法的写法"
         },
         "generator-ts-api.requestImportPath": {
           "type": "string",
           "default": "",
-          "description": "request 的 import 路径。axios-wrapper 默认 @/utils/request，axios 默认 axios，fetch 无需填写；custom 模式可直接填写完整 import 片段（原样插入），留空则不生成 import"
+          "description": "request 模块的 import 路径。留空时按模式取默认值：axios-wrapper 为 @/utils/request，axios 为 axios，fetch 无需填写；custom 模式下可直接填写完整 import 语句（原样插入文件顶部），留空则不生成 import"
         },
         "generator-ts-api.directReplacementRequestImportPath": {
           "type": "boolean",
           "default": false,
-          "description": "是否直接替换 request 的 import 路径。true 时 requestImportPath 视为完整 import 片段，mode 不再参与 import 生成"
+          "description": "为 true 时，requestImportPath 的内容会被当作一段完整 import 代码原样插入，不再根据 httpClient 模式自动生成 import 语句。适合 request 模块导出方式较特殊的项目"
         },
         "generator-ts-api.generateRequestScaffold": {
           "type": "boolean",
           "default": false,
-          "description": "是否在输出目录生成 request.ts 样板文件（含拦截器占位注释）。文件已存在时不覆盖"
+          "description": "为 true 时在输出目录额外生成一份 request 样板文件（含请求/响应拦截器占位注释），方便快速接入。若同名文件已存在则跳过、不会覆盖"
         },
         "generator-ts-api.compatibilityVersion": {
           "type": "string",
@@ -178,10 +178,10 @@
           ],
           "default": "latest",
           "enumDescriptions": [
-            "使用当前版本默认映射：int64 -> string, date-time -> string, binary -> Blob",
-            "兼容 0.0.x 输出行为：int64 -> number, date-time -> string, binary -> string"
+            "latest：使用当前版本的默认类型映射（int64 → string，date-time → string，binary → Blob）",
+            "0.0.x：兼容 0.0.x 旧版输出行为（int64 → number，date-time → string，binary → string）"
           ],
-          "description": "生成结果兼容目标版本"
+          "description": "生成结果兼容的目标版本。仅影响标量类型的默认映射；typeMapping.* 的自定义配置仍会在此基础上覆盖"
         },
         "generator-ts-api.typeMapping.dateTimeTarget": {
           "type": "string",
@@ -190,12 +190,12 @@
             "Date"
           ],
           "default": "string",
-          "description": "date-time 的目标类型（默认 string，可切换 Date）"
+          "description": "format 为 date-time 的字段生成的 TypeScript 类型，默认 string，可切换为 Date。等价于在 formatMap 中配置 date-time"
         },
         "generator-ts-api.typeMapping.formatMap": {
           "type": "object",
           "default": {},
-          "description": "自定义格式映射（覆盖默认映射），例如 {\"int64\":\"bigint\",\"binary\":\"Blob\" }",
+          "description": "自定义『format → TypeScript 类型』映射，会覆盖默认映射及 compatibilityVersion。键为 OpenAPI format 名称，例如 {\"int64\":\"bigint\",\"binary\":\"Blob\"}",
           "additionalProperties": {
             "type": "string"
           }
@@ -203,35 +203,39 @@
         "generator-ts-api.customTemplate.templateFile": {
           "type": "string",
           "default": "",
-          "description": "自定义模板文件路径（.txt 等）。优先于 customTemplate.templateString。占位符：{{method}} {{METHOD}} {{url}} {{params}} {{body}} {{returnType}} {{methodName}} {{contentType}}"
+          "description": "【仅 custom 模式生效】自定义方法体模板文件路径（.txt 等纯文本）。优先级高于 templateString。可用占位符：{{method}}（小写）{{METHOD}}（大写）{{url}} {{params}} {{body}} {{returnType}} {{methodName}} {{contentType}}"
         },
         "generator-ts-api.customTemplate.templateString": {
           "type": "string",
           "default": "",
-          "description": "自定义内联模板字符串（templateFile 为空时使用）。占位符同上"
+          "description": "【仅 custom 模式生效】自定义方法体内联模板字符串，当 templateFile 留空时使用。可用占位符同 templateFile"
         },
         "generator-ts-api.mock.outputFormat": {
           "type": "string",
-          "enum": ["json", "msw", "json-server"],
+          "enum": [
+            "json",
+            "msw",
+            "json-server"
+          ],
           "default": "json",
           "enumDescriptions": [
-            "纯 JSON 文件，键为 \"METHOD /path\"，值为响应体 Mock 数据",
-            "MSW (Mock Service Worker) handlers 文件（TypeScript），适合浏览器 / Vitest 使用",
-            "json-server 格式：生成 db.json + routes.json，可直接用 json-server 启动本地 Mock 服务"
+            "json：纯 JSON 文件，键为 \"METHOD /path\"，值为该接口响应体的 Mock 数据",
+            "msw：生成 MSW（Mock Service Worker）handlers 文件（TypeScript），适合浏览器 / Vitest 中拦截请求",
+            "json-server：生成 db.json + routes.json，可直接用 json-server 启动本地 Mock 服务"
           ],
-          "description": "Mock 数据输出格式"
+          "description": "「生成Mock数据」命令的输出格式"
         },
         "generator-ts-api.mock.baseUrl": {
           "type": "string",
           "default": "",
-          "description": "MSW / json-server 模式下的 API 基础路径前缀，例如 /api 或 https://example.com/api"
+          "description": "【仅 msw / json-server 格式生效】Mock 接口的基础路径前缀，会拼在每个接口路径之前，例如 /api 或 https://example.com/api"
         },
         "generator-ts-api.mock.arrayItemCount": {
           "type": "number",
           "default": 2,
           "minimum": 1,
           "maximum": 20,
-          "description": "数组字段每次生成的示例条目数（默认 2）"
+          "description": "生成 Mock 数据时，数组类型字段默认填充的示例条目数量，默认 2，取值范围 1–20"
         }
       }
     }
@@ -246,19 +250,19 @@
     "build": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.60.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
+    "@types/node": "^20.19.41",
+    "@types/vscode": "^1.60.0",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
-    "eslint": "^9.23.0",
-    "typescript": "^5.8.2",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1"
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.23.0",
+    "typescript": "^5.8.2"
   },
   "dependencies": {
     "axios": "^1.6.7",
-    "yaml": "^2.3.4",
-    "openapi-types": "^12.1.3"
+    "openapi-types": "^12.1.3",
+    "yaml": "^2.3.4"
   }
 }

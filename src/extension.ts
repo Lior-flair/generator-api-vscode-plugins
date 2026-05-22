@@ -76,7 +76,7 @@ function maybeGenerateScaffold(
   outputType: string
 ): void {
   if (!httpClientConfig.generateRequestScaffold) return
-  const outputDir = outputSplit === "byTag" ? outputFsPath : path.dirname(outputFsPath)
+  const outputDir = outputSplit !== "single" ? outputFsPath : path.dirname(outputFsPath)
   const ext = outputType === "js" ? "js" : "ts"
   generateRequestScaffoldFile(outputDir, httpClientConfig, ext)
 }
@@ -229,9 +229,9 @@ export function activate(context: vscode.ExtensionContext) {
 
         const generator = getGenerator(apiDocs)
         let outputFsPath: string | undefined
-        if (outputSplit === "byTag") {
+        if (outputSplit !== "single") {
           const folderUri = await vscode.window.showOpenDialog({
-            title: "选择输出目录（按 Tag 拆分）",
+            title: "选择输出目录（多文件拆分）",
             canSelectFolders: true,
             canSelectFiles: false,
             canSelectMany: false,
@@ -307,9 +307,9 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           let outputFsPath: string | undefined
-          if (outputSplit === "byTag") {
+          if (outputSplit !== "single") {
             const folderUri = await vscode.window.showOpenDialog({
-              title: "选择输出目录（按 Tag 拆分）",
+              title: "选择输出目录（多文件拆分）",
               canSelectFolders: true,
               canSelectFiles: false,
               canSelectMany: false,
@@ -401,9 +401,9 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           let outputFsPath: string | undefined
-          if (outputSplit === "byTag") {
+          if (outputSplit !== "single") {
             const folderUri = await vscode.window.showOpenDialog({
-              title: "选择输出目录（按 Tag 拆分）",
+              title: "选择输出目录（多文件拆分）",
               canSelectFolders: true,
               canSelectFiles: false,
               canSelectMany: false,
