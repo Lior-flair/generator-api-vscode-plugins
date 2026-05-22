@@ -40,12 +40,45 @@ const TS_BUILTIN_TYPE_NAMES = new Set([
   "Promise",
   "Map",
   "Set",
+  "List",
+  "Collection",
   "readonly",
   "keyof",
   "infer",
   "extends",
   "as",
 ])
+
+/**
+ * Java / Swagger 2.x 标量类型 → TypeScript 类型。
+ * 用于泛型表达式（如 接口返回对象«Integer»）中的叶子类型 —— 这些标量并不存在
+ * 对应的类型定义，若按普通标识符归一化（尤其 camelCase 下 Integer → integer）
+ * 会得到一个不存在的类型而报错。
+ */
+const JAVA_SCALAR_TO_TS: Record<string, string> = {
+  Integer: "number",
+  Long: "number",
+  Short: "number",
+  Byte: "number",
+  BigInteger: "number",
+  BigDecimal: "number",
+  Float: "number",
+  Double: "number",
+  Number: "number",
+  int: "number",
+  long: "number",
+  short: "number",
+  byte: "number",
+  float: "number",
+  double: "number",
+  Boolean: "boolean",
+  String: "string",
+  Character: "string",
+  char: "string",
+  CharSequence: "string",
+  Void: "void",
+  Object: "any",
+}
 
 export function normalizeIdentifierName(
   name: string,
@@ -71,6 +104,10 @@ export function normalizeTypeExpression(
     const token = segment.trim().replace(/\s+/g, "_")
     if (!token) return segment
     if (TS_BUILTIN_TYPE_NAMES.has(token)) return token
+    // Java/Swagger \u6807\u91cf\u53f6\u5b50\u7c7b\u578b\u6620\u5c04\u4e3a TS \u7c7b\u578b\uff08\u907f\u514d\u5f52\u4e00\u5316\u6210\u4e0d\u5b58\u5728\u7684\u7c7b\u578b\u540d\uff09
+    if (Object.prototype.hasOwnProperty.call(JAVA_SCALAR_TO_TS, token)) {
+      return JAVA_SCALAR_TO_TS[token]
+    }
     return normalizeIdentifierName(token, casing)
   })
 }
