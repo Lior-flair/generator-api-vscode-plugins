@@ -282,6 +282,7 @@ export function activate(context: vscode.ExtensionContext) {
           const httpClientConfig = buildHttpClientConfig(config)
           const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
           const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+          const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
           const genResult = await generator.generate(
             apiDocs,
             framework,
@@ -291,7 +292,8 @@ export function activate(context: vscode.ExtensionContext) {
             namingConfig,
             httpClientConfig,
             cleanOutputDir,
-            byControllerLocalTypes
+            byControllerLocalTypes,
+            extractSharedTypes
           )
           maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
           vscode.window.showInformationMessage(buildSuccessMessage(genResult))
@@ -383,6 +385,7 @@ export function activate(context: vscode.ExtensionContext) {
             const httpClientConfig = buildHttpClientConfig(config)
             const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
             const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+            const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
             const genResult = await generator.generate(
               apiDocs,
               framework,
@@ -392,7 +395,8 @@ export function activate(context: vscode.ExtensionContext) {
               namingConfig,
               httpClientConfig,
               cleanOutputDir,
-              byControllerLocalTypes
+              byControllerLocalTypes,
+              extractSharedTypes
             )
             maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
             // 保存成功的 URL 到历史记录（记录 Swagger 版本）
@@ -484,6 +488,7 @@ export function activate(context: vscode.ExtensionContext) {
             const httpClientConfig = buildHttpClientConfig(config)
             const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
             const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+            const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
             const genResult = await generator.generate(
               apiDocs,
               framework,
@@ -493,7 +498,8 @@ export function activate(context: vscode.ExtensionContext) {
               namingConfig,
               httpClientConfig,
               cleanOutputDir,
-              byControllerLocalTypes
+              byControllerLocalTypes,
+              extractSharedTypes
             )
             maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
             vscode.window.showInformationMessage(buildSuccessMessage(genResult))

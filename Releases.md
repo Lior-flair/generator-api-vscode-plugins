@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+#### 新增 `byControllerSingleFile` 输出拆分模式
+
+`generator-ts-api.outputSplit` 新增第四个可选值 `byControllerSingleFile`：每个控制器生成**一个** `.ts` 文件，且该控制器用到的类型（含传递依赖）**内联**在同一文件中，不再生成共享 `types/` 目录。
+
+```text
+output/
+  controllers/
+    用户.ts        ← 顶部内联「用户」用到的类型 + 控制器类
+    订单.ts
+    index.ts
+  index.ts
+```
+
+- 与 `byController` 的区别：`byController` 是「一个控制器一个文件夹」，本模式是「一个控制器一个文件」。
+- 与 `byTag` 的区别：`byTag` 类型集中在共享 `types/`，本模式类型内联在各控制器文件内、不产生类型导入。
+- 权衡：多个控制器共用的类型会在各自文件中重复一份，失去单一数据源；好处是每个文件完全自包含、可单独拷走。
+
+#### 新增「抽离共用类型」开关（`byControllerSingleFile.extractSharedTypes`）
+
+新增配置 `generator-ts-api.byControllerSingleFile.extractSharedTypes`（布尔值，默认 `false`，仅 `byControllerSingleFile` 模式生效）。
+
+为 `true` 时，先统计每个类型被多少个控制器使用：被**两个及以上**控制器共用的类型抽离到共享 `types/` 目录、控制器文件改为 `import` 引入；仅被**单个**控制器使用的类型仍内联在该控制器文件内。这样既保留「每个控制器一个文件」的结构，又避免共用类型在多个文件中重复。
+
+```text
+output/
+  types/
+    index.ts       ← 仅含被多个控制器共用的类型
+  controllers/
+    用户.ts        ← 内联「用户」独有的类型 + import 共用类型
+    订单.ts
+    index.ts
+  index.ts
+```
+
 ## [0.1.6] - 2026年5月22日
 
 #### 新增 `byController` 输出拆分模式

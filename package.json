@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -79,15 +79,17 @@
           "enum": [
             "single",
             "byTag",
-            "byController"
+            "byController",
+            "byControllerSingleFile"
           ],
           "default": "single",
           "enumDescriptions": [
             "single：所有接口和类型生成到一个文件中",
             "byTag：按 Tag（接口分组）拆分。类型统一放在 类型目录/index，每个 Tag 生成一个控制器文件，并生成 index 统一导出。目录结构：types/index、controllers/用户.ts、controllers/订单.ts、index",
-            "byController：在 byTag 基础上，每个控制器单独成一个文件夹。目录结构：types/index、controllers/用户/index、controllers/订单/index、index。适合单个控制器接口较多、希望后续在其文件夹内继续扩展的场景"
+            "byController：在 byTag 基础上，每个控制器单独成一个文件夹。目录结构：types/index、controllers/用户/index、controllers/订单/index、index。适合单个控制器接口较多、希望后续在其文件夹内继续扩展的场景",
+            "byControllerSingleFile：每个控制器一个 .ts 文件，且该控制器用到的类型（含传递依赖）内联在同一文件中，不生成共享类型目录。目录结构：controllers/用户.ts、controllers/订单.ts、index。适合希望每个文件自包含、可单独拷走的场景（多个控制器共用的类型会重复）"
           ],
-          "description": "输出拆分策略。single：单文件输出；byTag：按 Tag 拆分为多文件；byController：按 Controller 拆分为独立文件夹。byTag / byController 模式下生成时会要求选择一个输出『目录』，single 模式则要求选择输出『文件』"
+          "description": "输出拆分策略。single：单文件输出；byTag：按 Tag 拆分为多文件；byController：按 Controller 拆分为独立文件夹；byControllerSingleFile：每个 Controller 一个文件且类型内联。single 以外的模式生成时均要求选择一个输出『目录』"
         },
         "generator-ts-api.naming.typesDirName": {
           "type": "string",
@@ -147,6 +149,11 @@
           "type": "boolean",
           "default": false,
           "description": "【仅 byController 模式生效】为 true 时，不再生成共享的类型目录，而是在每个控制器文件夹内单独生成一个 types 文件，仅包含该控制器用到的类型及其传递依赖，使每个控制器文件夹自成一体"
+        },
+        "generator-ts-api.byControllerSingleFile.extractSharedTypes": {
+          "type": "boolean",
+          "default": false,
+          "description": "【仅 byControllerSingleFile 模式生效】为 true 时，被两个及以上控制器共用的类型会被抽离到共享类型目录，控制器文件改为 import 引入；仅被单个控制器使用的类型仍内联在该控制器文件内。可避免共用类型在多个文件中重复"
         },
         "generator-ts-api.httpClient": {
           "type": "string",

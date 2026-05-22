@@ -738,6 +738,14 @@ export function cleanSplitOutputDir(outputDir: string, naming: NamingConfig): vo
   }
 }
 
+/**
+ * 拆分输出时类型的组织方式：
+ *  - shared：所有控制器共享一个 {typesDirName} 目录（byTag / 默认 byController）
+ *  - localFile：每个控制器文件夹内单独生成 types 文件（byController + localTypes）
+ *  - inline：类型定义直接内联进控制器自身文件（byControllerSingleFile）
+ */
+export type SplitTypeMode = "shared" | "localFile" | "inline"
+
 /** writeControllers 入参 */
 export interface WriteControllersParams {
   /** 输出根目录 */
@@ -746,7 +754,7 @@ export interface WriteControllersParams {
   controllersDir: string
   /** 文件扩展名（ts / js） */
   ext: string
-  /** 是否 byController 模式（每个控制器独立文件夹） */
+  /** 是否每个控制器独立文件夹（仅 byController 模式为 true） */
   byController: boolean
   naming: NamingConfig
   httpClientConfig: HttpClientConfig
@@ -756,12 +764,16 @@ export interface WriteControllersParams {
   describe: (controllerKey: string) => string
   /** 全部可作为类型导入的候选类型名 */
   typeImportCandidates: string[]
+  /** 类型组织方式 */
+  typeMode: SplitTypeMode
+  /** localFile / inline 模式需要：类型名 -> 类型定义代码 */
+  typeDefMap?: Map<string, string>
   /**
-   * 仅 byController 模式有效：给定该控制器用到的类型名，返回应写入该控制器
-   * 文件夹内 types 文件的完整内容。提供该回调即启用「每个控制器独立类型文件」，
-   * 不提供则所有控制器共享 {typesDirName} 目录。
+   * 仅 inline 模式有效：为 true 时，被两个及以上控制器共用的类型会被抽离到
+   * 共享 {typesDirName} 目录，控制器文件改为 import；仅被单个控制器使用的
+   * 类型仍内联在该控制器文件内，避免共用类型在多个文件中重复。
    */
-  buildLocalTypesContent?: (usedTypes: string[]) => string
+  extractSharedTypes?: boolean
 }
 
 /**
@@ -785,9 +797,11 @@ export function writeControllers(
     controllers,
     describe,
     typeImportCandidates,
-    buildLocalTypesContent,
+    typeMode,
+    typeDefMap,
+    extractSharedTypes,
   } = params
-  const localTypes = byController && typeof buildLocalTypesContent === "function"
+  const defs = typeDefMap || new Map<string, string>()
 
   if (!fs.existsSync(controllersDir)) fs.mkdirSync(controllersDir, { recursive: true })
 
@@ -795,6 +809,25 @@ export function writeControllers(
   const sharedTypesImportPath = byController
     ? `../../${naming.typesDirName}`
     : `../${naming.typesDirName}`
+
+  // inline + 抽离共享类型：先统计每个类型被多少个控制器使用，得出「共享类型集」
+  const inlineExtract = typeMode === "inline" && extractSharedTypes === true && ext === "ts"
+  const closureCache = new Map<string, string[]>()
+  const sharedTypeNames = new Set<string>()
+  if (inlineExtract) {
+    const usageCount = new Map<string, number>()
+    for (const [key, methods] of controllers) {
+      const used = extractUsedTypeNames(methods.join("\n\n"), typeImportCandidates).filter(
+        (n) => n !== "RequestConfig"
+      )
+      const closure = computeTypeClosure(used, defs)
+      closureCache.set(key, closure)
+      for (const t of closure) usageCount.set(t, (usageCount.get(t) || 0) + 1)
+    }
+    for (const [t, count] of usageCount) {
+      if (count >= 2) sharedTypeNames.add(t)
+    }
+  }
 
   const fileNames: string[] = []
   let fileCount = 0
@@ -809,15 +842,44 @@ export function writeControllers(
       ext === "ts"
         ? extractUsedTypeNames(methodsCode, typeImportCandidates).filter((n) => n !== "RequestConfig")
         : []
-    const typesImportPath = localTypes ? "./types" : sharedTypesImportPath
-    const typeImportLine =
-      usedTypes.length > 0
-        ? `import type { ${usedTypes.join(", ")} } from "${typesImportPath}"`
-        : ""
 
+    // 计算该控制器用到类型的传递依赖闭包（localFile / inline 模式需要）
+    const closure =
+      ext === "ts" && usedTypes.length > 0 && typeMode !== "shared"
+        ? closureCache.get(controllerKey) || computeTypeClosure(usedTypes, defs)
+        : []
+
+    // 类型部分：import 行（shared / localFile / inline 抽离）或内联代码块（inline）
+    let typeImportLine = ""
+    let inlineTypesBlock = ""
+    if (ext === "ts" && usedTypes.length > 0) {
+      if (typeMode === "inline") {
+        // 抽离模式下，共用类型不再内联，改为后续 import
+        const inlineNames = inlineExtract
+          ? closure.filter((n) => !sharedTypeNames.has(n))
+          : closure
+        const inlineBody = inlineNames.map((n) => defs.get(n)).filter(Boolean).join("\n\n")
+        if (inlineBody) inlineTypesBlock = `// 类型定义\n${inlineBody}\n`
+        if (inlineExtract) {
+          // 本文件（内联类型 + 方法代码）真正引用到的、已抽离的共享类型 → import
+          const combined = `${inlineBody}\n${methodsCode}`
+          const importNames = closure.filter(
+            (n) => sharedTypeNames.has(n) && containsIdentifier(combined, n)
+          )
+          if (importNames.length > 0) {
+            typeImportLine = `import type { ${importNames.join(", ")} } from "${sharedTypesImportPath}"`
+          }
+        }
+      } else {
+        const importPath = typeMode === "localFile" ? "./types" : sharedTypesImportPath
+        typeImportLine = `import type { ${usedTypes.join(", ")} } from "${importPath}"`
+      }
+    }
+
+    const headParts = [importLine, typeImportLine, inlineTypesBlock].filter(Boolean)
     const controllerCode =
-      [importLine, typeImportLine].filter(Boolean).join("\n\n") +
-      ([importLine, typeImportLine].filter(Boolean).length > 0 ? "\n\n" : "") +
+      headParts.join("\n\n") +
+      (headParts.length > 0 ? "\n\n" : "") +
       `/**\n * ${description}\n */\n` +
       `export class ${className} {\n${methodsCode}\n}\n`
 
@@ -827,12 +889,15 @@ export function writeControllers(
       if (!fs.existsSync(controllerSubDir)) fs.mkdirSync(controllerSubDir, { recursive: true })
       fs.writeFileSync(path.join(controllerSubDir, `index.${ext}`), controllerCode, "utf-8")
       fileCount++
-      if (localTypes) {
-        const localTypesContent = (buildLocalTypesContent as (u: string[]) => string)(usedTypes)
+      if (typeMode === "localFile") {
+        const localBody = closure.map((n) => defs.get(n)).filter(Boolean).join("\n\n")
+        const localTypesContent =
+          `// 生成时间: ${new Date().toISOString()}\n\n` + (localBody ? `${localBody}\n` : "")
         fs.writeFileSync(path.join(controllerSubDir, `types.${ext}`), localTypesContent, "utf-8")
         fileCount++
       }
     } else {
+      // 扁平文件：{controllersDir}/{fileName}.{ext}
       fs.writeFileSync(path.join(controllersDir, `${fileName}.${ext}`), controllerCode, "utf-8")
       fileCount++
     }
@@ -844,9 +909,27 @@ export function writeControllers(
   fs.writeFileSync(path.join(controllersDir, `index.${ext}`), controllersIndexCode, "utf-8")
   fileCount++
 
-  // 根 index.{ext}：本地类型模式下类型不再统一导出，仅导出控制器
+  // inline + 抽离模式：把共用类型写入共享 {typesDirName} 目录
+  let typesDirExported = typeMode === "shared"
+  if (inlineExtract && sharedTypeNames.size > 0) {
+    const typesDir = path.join(outputDir, naming.typesDirName)
+    if (!fs.existsSync(typesDir)) fs.mkdirSync(typesDir, { recursive: true })
+    const sharedBody = Array.from(sharedTypeNames)
+      .sort((a, b) => a.localeCompare(b))
+      .map((n) => defs.get(n))
+      .filter(Boolean)
+      .join("\n\n")
+    const sharedContent =
+      `// 生成时间: ${new Date().toISOString()}\n\n` +
+      `// 多个控制器共用的类型\n${sharedBody}\n`
+    fs.writeFileSync(path.join(typesDir, `index.${ext}`), sharedContent, "utf-8")
+    fileCount++
+    typesDirExported = true
+  }
+
+  // 根 index.{ext}：存在共享类型目录时一并导出
   const rootExports = [`export * from "./${naming.controllersDirName}"`]
-  if (!localTypes) {
+  if (typesDirExported) {
     rootExports.unshift(`export * from "./${naming.typesDirName}"`)
   }
   fs.writeFileSync(path.join(outputDir, `index.${ext}`), rootExports.join("\n") + "\n", "utf-8")

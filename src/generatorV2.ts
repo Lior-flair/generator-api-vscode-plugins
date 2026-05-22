@@ -6,7 +6,6 @@ import {
   buildMethodBody,
   buildUniqueMethodName,
   cleanSplitOutputDir,
-  computeTypeClosure,
   DEFAULT_HTTP_CLIENT_CONFIG,
   DEFAULT_NAMING,
   type HttpClientConfig,
@@ -16,6 +15,7 @@ import {
   resolveMappedScalarType,
   sanitizeName,
   type SplitOutputResult,
+  type SplitTypeMode,
   toPascalCase,
   writeControllers,
 } from "./generatorCommon"
@@ -45,7 +45,7 @@ export class ApiGenerator {
   /** 当前生成任务的命名配置 */
   private naming: NamingConfig = DEFAULT_NAMING
 
-  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG, cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false): Promise<SplitOutputResult | void> {
+  async generate(apiDocs: any, framework: string, outputType: string, outputPath: string, outputSplit: string = "single", namingConfig: NamingConfig = DEFAULT_NAMING, httpClientConfig: HttpClientConfig = DEFAULT_HTTP_CLIENT_CONFIG, cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false, extractSharedTypes: boolean = false): Promise<SplitOutputResult | void> {
     try {
       if (!this.isValidApiDoc(apiDocs)) {
         throw new Error("无效的API文档")
@@ -54,9 +54,9 @@ export class ApiGenerator {
       this.httpClientConfig = httpClientConfig
       this.naming = namingConfig
 
-      if (outputSplit === "byTag" || outputSplit === "byController") {
+      if (outputSplit === "byTag" || outputSplit === "byController" || outputSplit === "byControllerSingleFile") {
         // 按 Tag / Controller 拆分多文件输出
-        return this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit === "byController", cleanOutputDir, byControllerLocalTypes)
+        return this.generateBySplit(apiDocs, framework, outputType, outputPath, namingConfig, outputSplit, cleanOutputDir, byControllerLocalTypes, extractSharedTypes)
       } else {
         const code = this.generateCode(apiDocs)
 
@@ -75,17 +75,21 @@ export class ApiGenerator {
 
   /**
    * 按 Tag / Controller 拆分输出：
-   *  byTag 模式：
-   *   - {typesDirName}/index.{ext}        泛型类型 + 接口类型 + 参数类型
-   *   - {controllersDirName}/{Tag}.{ext}  每个 Tag 对应的 Controller 类
-   *   - index.{ext}                       统一 re-export
-   *  byController 模式（byController = true）：
-   *   - {controllersDirName}/{Tag}/index.{ext}  每个 Controller 独立文件夹
+   *  byTag                  ：{controllersDirName}/{Tag}.{ext}，共享 {typesDirName}/index
+   *  byController           ：{controllersDirName}/{Tag}/index.{ext}，共享 {typesDirName}/index
+   *                           （byControllerLocalTypes 为 true 时改为各控制器文件夹内独立 types 文件）
+   *  byControllerSingleFile ：{controllersDirName}/{Tag}.{ext}，类型内联进控制器自身文件
    */
-  private generateBySplit(apiDocs: any, framework: string, outputType: string, outputDir: string, naming: NamingConfig = DEFAULT_NAMING, byController: boolean = false, cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false): SplitOutputResult {
+  private generateBySplit(apiDocs: any, framework: string, outputType: string, outputDir: string, naming: NamingConfig = DEFAULT_NAMING, splitMode: string = "byTag", cleanOutputDir: boolean = false, byControllerLocalTypes: boolean = false, extractSharedTypes: boolean = false): SplitOutputResult {
     const ext = outputType === "js" ? "js" : "ts"
-    // 是否启用「每个控制器独立类型文件」（仅 byController 模式有效）
-    const useLocalTypes = byController && byControllerLocalTypes
+    const byController = splitMode === "byController"
+    const singleFile = splitMode === "byControllerSingleFile"
+    // 类型组织方式：inline 内联 / localFile 各控制器独立 / shared 共享目录
+    const typeMode: SplitTypeMode = singleFile
+      ? "inline"
+      : byController && byControllerLocalTypes
+      ? "localFile"
+      : "shared"
 
     // 重置状态，与 generateCode 的配置一致
     this.genericTypes = []
@@ -138,8 +142,8 @@ export class ApiGenerator {
     }
     const typeCount = typeDefMap.size
 
-    // ── 1. 共享类型文件（本地类型模式下跳过）──────────────────────
-    if (!useLocalTypes) {
+    // ── 1. 共享类型文件（仅 shared 模式生成）──────────────────────
+    if (typeMode === "shared") {
       const typesDir = path.join(outputDir, naming.typesDirName)
       if (!fs.existsSync(typesDir)) fs.mkdirSync(typesDir, { recursive: true })
       const typesCode =
@@ -168,15 +172,6 @@ export class ApiGenerator {
         t.name === controllerKey || this.sanitizeName(t.name) === controllerKey
       )?.description || ""
 
-    // 本地类型模式：为每个控制器生成只含其用到类型（含传递依赖）的 types 文件
-    const buildLocalTypesContent = useLocalTypes
-      ? (usedTypes: string[]): string => {
-          const closure = computeTypeClosure(usedTypes, typeDefMap)
-          const body = closure.map((n) => typeDefMap.get(n)).filter(Boolean).join("\n\n")
-          return `// 生成时间: ${new Date().toISOString()}\n\n` + (body ? `${body}\n` : "")
-        }
-      : undefined
-
     // ── 2. 写入控制器文件与各级 index ─────────────────────────────
     const { controllerCount, fileCount } = writeControllers({
       outputDir,
@@ -188,14 +183,16 @@ export class ApiGenerator {
       controllers,
       describe,
       typeImportCandidates,
-      buildLocalTypesContent,
+      typeMode,
+      typeDefMap,
+      extractSharedTypes,
     })
 
     return {
       controllerCount,
       typeCount,
-      // 共享类型模式下额外写了一个 {typesDirName}/index 文件
-      fileCount: fileCount + (useLocalTypes ? 0 : 1),
+      // shared 模式额外写了一个 {typesDirName}/index 文件
+      fileCount: fileCount + (typeMode === "shared" ? 1 : 0),
     }
   }
 

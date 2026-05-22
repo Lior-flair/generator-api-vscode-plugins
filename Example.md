@@ -333,6 +333,75 @@ output/
 
 ---
 
+## 12c-2) 输出策略：byControllerSingleFile（一个控制器一个文件，类型内联）
+
+适合：希望每个控制器就是一个独立 `.ts` 文件、类型也写在文件里，可单独拷贝使用。
+
+```jsonc
+{
+  "generator-ts-api.outputSplit": "byControllerSingleFile"
+}
+```
+
+示例输出结构：
+
+```text
+output/
+  controllers/
+    用户.ts        ← 文件内含「用户」用到的类型定义 + 控制器类
+    订单.ts
+    index.ts
+  index.ts
+```
+
+控制器文件内部形如：
+
+```typescript
+import request, { getConfigs, type RequestConfig } from "@/utils/request"
+
+// 类型定义
+export interface User { ... }
+export interface Page { ... }
+
+/**
+ * 用户
+ */
+export class 用户 {
+  static getUser(...): Promise<User> { ... }
+}
+```
+
+说明：
+- 不生成共享 `types/` 目录，也没有 `import type {...}`，类型直接内联。
+- 多个控制器共用的类型会在各文件中各重复一份。
+- 与 `byController`（一个控制器一个文件夹）相对，本模式是一个控制器一个文件。
+
+### 抽离共用类型（`byControllerSingleFile.extractSharedTypes`）
+
+不想让共用类型重复时，开启此开关：
+
+```jsonc
+{
+  "generator-ts-api.outputSplit": "byControllerSingleFile",
+  "generator-ts-api.byControllerSingleFile.extractSharedTypes": true
+}
+```
+
+被两个及以上控制器共用的类型会抽到共享 `types/` 目录，仅单个控制器用到的类型仍内联：
+
+```text
+output/
+  types/
+    index.ts       ← 仅含被多个控制器共用的类型
+  controllers/
+    用户.ts        ← 内联「用户」独有类型 + import 共用类型
+    订单.ts
+    index.ts
+  index.ts
+```
+
+---
+
 ## 12d) 生成前清空旧输出（`cleanOutputDir`）
 
 适合：接口会增删，希望每次生成都是干净结果，不残留已删除接口的旧文件。
@@ -799,6 +868,7 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 - 还是旧导入风格：检查 `httpClient` 是否仍是 `axios-wrapper`。
 - 没拆分文件：检查 `outputSplit` 是否为 `byTag` 或 `byController`。
 - 想每个控制器独占文件夹：用 `outputSplit: "byController"`；想让文件夹内自带类型再开 `byController.localTypes`。
+- 想每个控制器就是一个自包含的 .ts 文件（类型内联）：用 `outputSplit: "byControllerSingleFile"`。
 - 生成结果残留已删除接口的旧文件：开启 `cleanOutputDir`，生成前自动清理插件生成的目录。
 - 没生成 `request.ts`（随 API 代码）：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
 - 想单独生成 request 文件：使用命令面板执行 `生成封装Request模板文件`，可选择模式和保存位置，已存在文件会提示确认覆盖。
