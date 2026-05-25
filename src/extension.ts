@@ -234,6 +234,7 @@ export function activate(context: vscode.ExtensionContext) {
         controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
         controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
         methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
+        typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
       }
 
       // 右侧 loading
@@ -354,6 +355,7 @@ export function activate(context: vscode.ExtensionContext) {
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
             methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
+            typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
           }
 
           let outputFsPath: string | undefined
@@ -460,6 +462,7 @@ export function activate(context: vscode.ExtensionContext) {
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
             methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
+            typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
           }
 
           let outputFsPath: string | undefined

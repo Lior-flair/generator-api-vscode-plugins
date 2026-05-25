@@ -860,6 +860,50 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 | `camelCase` | `listV2` |
 | `kebab-case` | `list-v2` |
 
+> 注意：`methodNameCasing` 同时会作为「类型命名」的默认风格。若希望方法用小驼峰、类型保持大驼峰，请配合下面的 `typeNameCasing` 使用。
+
+---
+
+## 25b) 类型名命名风格（`typeNameCasing`）
+
+适合：方法名和类型名想用不同风格（常见：方法 `camelCase`、类型 `PascalCase`）。
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNameCasing": "camelCase",
+  "generator-ts-api.naming.typeNameCasing": "PascalCase"
+}
+```
+
+| 值 | 类型 `SysUser` 生成结果 |
+|---|---|
+| `follow`（默认） | 跟随 `methodNameCasing`（向后兼容旧行为） |
+| `default` | `SysUser`（保持原名，仅过滤特殊字符） |
+| `PascalCase` | `SysUser`（推荐 TS 类型风格） |
+| `camelCase` | `sysUser` |
+| `kebab-case` | `sys-user` |
+
+效果：方法名 `getUser`（camelCase），类型名 `SysUser`（PascalCase），互不干扰。
+
+如果你之前已经设置了 `methodNameCasing: camelCase` 并发现 `SysUser` 变成了 `sysUser`、`List` 变成了 `list` 等问题，本配置就是解决方案。
+
+---
+
+## 25c) Java 标量类型在泛型表达式里的处理（Swagger 2.x）
+
+Swagger 2.x 文档中常见 `Result«Integer»`、`接口返回对象«Boolean»` 这类把 Java 标量当作泛型参数的形式。插件会自动把这些标量映射为对应的 TypeScript 类型，**无需配置**：
+
+| Java 类型（在 `«»` 里） | 自动生成的 TS 类型 |
+|---|---|
+| `Integer` / `Long` / `Short` / `Byte` / `BigInteger` / `BigDecimal` / `Float` / `Double` / `Number` | `number` |
+| `Boolean` | `boolean` |
+| `String` / `Character` / `CharSequence` | `string` |
+| `Void` | `void` |
+| `Object` | `any` |
+| `List` / `Collection` | 保留为 `Array<T>` 别名（插件内置） |
+
+示例：`Result«Integer»` 生成 `Result<number>`，`接口返回对象«List«SysUser»»` 生成 `接口返回对象<List<SysUser>>`（其中 `List<T> = Array<T>` 由插件自动注入到类型文件中）。
+
 ---
 
 ## 26) 快速排查
@@ -873,6 +917,7 @@ json-server --watch mock/db.json --routes mock/routes.json --port 3100
 - 没生成 `request.ts`（随 API 代码）：检查 `generateRequestScaffold`，以及目标目录是否已有同名文件。
 - 想单独生成 request 文件：使用命令面板执行 `生成封装Request模板文件`，可选择模式和保存位置，已存在文件会提示确认覆盖。
 - 方法名含特殊符号或编译报错：检查 `naming.methodNameCasing`，默认模式会自动将特殊符号替换为 `_`。
+- 类型名意外变小写（`SysUser` 变成 `sysUser`、`List` 变成 `list`）：因为 `methodNameCasing` 默认也会作用到类型名。配 `naming.typeNameCasing` 把类型独立设为 `PascalCase` 即可。
 - import 语句不符合预期：启用 `directReplacementRequestImportPath` 并在 `requestImportPath` 中填写完整 import 语句。
 - 填了 URL 却没找到文档：可只填服务基础地址（如 `http://host:8080`），插件会自动尝试 `/v3/api-docs` 等常见路径；具体尝试过程见「调试控制台」。
 - 命令无响应、无 loading 也无报错：打开 VS Code「调试控制台」查看 `[generator-ts-api]` 日志定位（命令触发、URL 候选、错误栈均会打印）。

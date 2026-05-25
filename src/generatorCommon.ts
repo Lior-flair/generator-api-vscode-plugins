@@ -5,6 +5,11 @@ export interface NamingConfig {
   controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   controllerClassNameSuffix: string
   methodNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
+  /**
+   * 类型名命名风格。"follow" 表示跟随 methodNameCasing（向后兼容旧行为）；
+   * 否则按所选风格归一化类型定义名与类型表达式中的标识符。
+   */
+  typeNameCasing: "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case"
 }
 
 export const DEFAULT_NAMING: NamingConfig = {
@@ -13,6 +18,14 @@ export const DEFAULT_NAMING: NamingConfig = {
   controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
   methodNameCasing: "default",
+  typeNameCasing: "follow",
+}
+
+/** 解析最终生效的「类型名命名风格」：follow 时回退到 methodNameCasing */
+export function resolveTypeNameCasing(
+  naming: NamingConfig
+): "default" | "PascalCase" | "camelCase" | "kebab-case" {
+  return naming.typeNameCasing === "follow" ? naming.methodNameCasing : naming.typeNameCasing
 }
 
 export function sanitizeName(name: string): string {

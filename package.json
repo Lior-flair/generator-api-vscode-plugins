@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -155,6 +155,25 @@
               "kebab-case：连字符，如 create-payment-intent"
             ],
             "description": "生成的接口请求方法名的命名风格，三种拆分模式下均生效"
+          },
+          "generator-ts-api.naming.typeNameCasing": {
+            "type": "string",
+            "enum": [
+              "follow",
+              "default",
+              "PascalCase",
+              "camelCase",
+              "kebab-case"
+            ],
+            "default": "follow",
+            "enumDescriptions": [
+              "follow（默认）：跟随 methodNameCasing 的设置，向后兼容旧行为",
+              "default：保持原始类型名，仅做特殊字符过滤",
+              "PascalCase：大驼峰，如 SysUser（推荐 TS 类型采用此风格）",
+              "camelCase：小驼峰，如 sysUser",
+              "kebab-case：连字符，如 sys-user"
+            ],
+            "description": "类型定义名与类型表达式中标识符的命名风格，三种拆分模式下均生效。常见用法：methodNameCasing 设 camelCase（方法用小驼峰）+ typeNameCasing 设 PascalCase（类型保留大驼峰）"
           }
         }
       },

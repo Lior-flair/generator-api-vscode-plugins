@@ -12,6 +12,7 @@ import {
   type NamingConfig,
   normalizeIdentifierName,
   resolveMappedScalarType,
+  resolveTypeNameCasing,
   sanitizeName,
   type SplitOutputResult,
   type SplitTypeMode,
@@ -329,7 +330,7 @@ ${methods.join("\n\n")}
   }
 
   private normalizeTypeIdentifier(name: string): string {
-    return normalizeIdentifierName(name, this.naming.methodNameCasing)
+    return normalizeIdentifierName(name, resolveTypeNameCasing(this.naming))
   }
 
   private generateTypeDefinition(

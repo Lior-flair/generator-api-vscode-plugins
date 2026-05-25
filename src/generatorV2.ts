@@ -13,6 +13,7 @@ import {
   normalizeIdentifierName,
   normalizeTypeExpression,
   resolveMappedScalarType,
+  resolveTypeNameCasing,
   sanitizeName,
   type SplitOutputResult,
   type SplitTypeMode,
@@ -235,11 +236,11 @@ export class ApiGenerator {
   }
 
   private normalizeTypeIdentifier(name: string): string {
-    return normalizeIdentifierName(name, this.naming.methodNameCasing)
+    return normalizeIdentifierName(name, resolveTypeNameCasing(this.naming))
   }
 
   private normalizeTypeExpr(typeExpr: string): string {
-    return normalizeTypeExpression(typeExpr, this.naming.methodNameCasing)
+    return normalizeTypeExpression(typeExpr, resolveTypeNameCasing(this.naming))
   }
 
   private normalizeFormat(format: unknown): string | undefined {

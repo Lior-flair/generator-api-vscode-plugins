@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026年5月25日
+
 #### 新增 `byControllerSingleFile` 输出拆分模式
 
 `generator-ts-api.outputSplit` 新增第四个可选值 `byControllerSingleFile`：每个控制器生成**一个** `.ts` 文件，且该控制器用到的类型（含传递依赖）**内联**在同一文件中，不再生成共享 `types/` 目录。
@@ -35,6 +37,69 @@ output/
     index.ts
   index.ts
 ```
+
+类型闭包是传递闭包，「共享类型的依赖也必然被同样多的控制器使用」，因此共享集自身封闭、`types/index.ts` 自包含；内联部分引用到的非内联类型必定在共享集里 —— 数学上无遗漏。
+
+#### 新增「类型名命名风格」独立配置（`naming.typeNameCasing`）
+
+旧版行为：类型定义名与类型表达式中的标识符跟随 `methodNameCasing` 一起被归一化。一旦把 `methodNameCasing` 设为 `camelCase`，连 `SysUser` 都会被改成 `sysUser`，常常不是想要的效果。
+
+新增 `generator-ts-api.naming.typeNameCasing`（在「多文件拆分 - 命名规范」分区），可独立控制类型命名：
+
+| 值 | 行为 |
+|---|---|
+| `follow`（默认） | 跟随 `methodNameCasing`，**与旧版完全一致**，不破坏既有用户 |
+| `default` | 保持原始类型名，仅做特殊字符过滤 |
+| `PascalCase` | 大驼峰，如 `SysUser`（推荐 TS 类型采用此风格） |
+| `camelCase` | 小驼峰，如 `sysUser` |
+| `kebab-case` | 连字符 |
+
+典型用法：方法用小驼峰、类型保持大驼峰：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNameCasing": "camelCase",
+  "generator-ts-api.naming.typeNameCasing": "PascalCase"
+}
+```
+
+#### `package.json` 配置项按功能分区
+
+设置界面里所有配置项原本平铺在一起，难以查找。改用 VS Code 的 `configuration` **数组**形式，把配置拆成 7 个带标题的小节：
+
+1. **API 文档来源** — `apiDocsUrl`、`apiDocsPath`
+2. **代码生成与输出** — `framework`、`outputType`、`outputSplit`、`cleanOutputDir`
+3. **多文件拆分 - 命名规范** — `naming.*`
+4. **多文件拆分 - 类型组织** — `byController.localTypes`、`byControllerSingleFile.extractSharedTypes`
+5. **HTTP 客户端** — `httpClient`、`requestImportPath`、`directReplacementRequestImportPath`、`generateRequestScaffold`、`customTemplate.*`
+6. **类型映射** — `compatibilityVersion`、`typeMapping.*`
+7. **Mock 数据** — `mock.*`
+
+所有配置 key、默认值、描述均保持不变，**不影响任何已有用户配置**。
+
+#### Bug 修复
+
+- **`List` / `Collection` 在 camelCase 下变成 `list` / `collection`**：V2 内置的 `export type List<T> = Array<T>` / `export type Collection<T> = Array<T>` 辅助别名是写死的大写形式，但 `normalizeTypeExpression` 会把表达式里的所有标识符按 `methodNameCasing` 归一化，导致 `接口返回对象«List«SysUser»»` 变成 `接口返回对象<list<sysUser>>`，编译器报「找不到名称 list」。已将 `List`、`Collection` 加入归一化白名单。
+- **Java/Swagger 标量类型在泛型表达式中无定义**：`接口返回对象«Integer»` / `Result«Boolean»` 这类叶子类型不是真实定义，普通归一化（camelCase 下 `Integer` → `integer`）后得到不存在的类型 → 编译错误；即便 `default` 模式下也只是把 `Integer` 当业务类型查找定义同样失败。新增 `JAVA_SCALAR_TO_TS` 映射，`normalizeTypeExpression` 遇到这类标量直接映射为 TS 类型：
+
+  | Java 类型 | TS 类型 |
+  |---|---|
+  | `Integer` / `Long` / `Short` / `Byte` / `BigInteger` / `BigDecimal` / `Float` / `Double` / `Number` | `number` |
+  | `Boolean` | `boolean` |
+  | `String` / `Character` / `CharSequence` | `string` |
+  | `Void` | `void` |
+  | `Object` | `any` |
+
+#### 技术变更
+
+- `generatorCommon.ts` `TS_BUILTIN_TYPE_NAMES` 新增 `List`、`Collection`
+- `generatorCommon.ts` 新增 `JAVA_SCALAR_TO_TS` 映射表
+- `generatorCommon.ts` `NamingConfig` 新增 `typeNameCasing` 字段；新导出 `resolveTypeNameCasing(naming)`
+- `generatorCommon.ts` `writeControllers` 新增 `extractSharedTypes` 参数；引入 `SplitTypeMode` (`shared` / `localFile` / `inline`) 统一三种类型组织方式
+- V2 / V3 `normalizeTypeIdentifier`、V2 `normalizeTypeExpr` 改用 `resolveTypeNameCasing(this.naming)` 而非 `methodNameCasing`
+- V2 / V3 `generateBySplit` 改为接收 `splitMode` 字符串，内部推导 `byController` / `singleFile` / `typeMode`
+- `generate()` 新增可选参数 `extractSharedTypes`
+- `package.json` `configuration` 由单对象改为 7 个分区的数组
 
 ## [0.1.6] - 2026年5月22日
 
