@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {

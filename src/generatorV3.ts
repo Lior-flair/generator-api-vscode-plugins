@@ -401,7 +401,14 @@ ${methods.join("\n\n")}
     const hasQueryOrPathParameters = Array.isArray(operation.parameters) && operation.parameters.some(
       (param: any) => this.isParameterObject(param) && (param.in === "path" || param.in === "query")
     )
-    let paramsAssign = hasQueryOrPathParameters ? "configs.params = params;" : ""
+    const hasRequestBody = !!(operation.requestBody && operation.requestBody.content && (
+      operation.requestBody.content["application/json"] ||
+      operation.requestBody.content["multipart/form-data"] ||
+      operation.requestBody.content["application/x-www-form-urlencoded"]
+    ))
+    // 有 query/path 参数时正常赋值；完全无参数时，params 在方法体内不会被引用，
+    // 也补一行赋值，避免出现未使用的形参
+    let paramsAssign = hasQueryOrPathParameters || !hasRequestBody ? "configs.params = params;" : ""
     // 处理请求体（requestBody 仅用于 buildMethodBody 的 truthy 判断）
     let requestBody = ""
     let dataAssign = ""

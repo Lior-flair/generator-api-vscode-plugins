@@ -1,5 +1,50 @@
 # Change Log
 
+## [0.2.1] - 2026年5月26日
+
+#### 优化 `finalOptions` / `configs.params` 的生成形式
+
+旧版行为（V2）：当接口的参数全部位于 query 时，生成的 `finalOptions` 会把每个字段逐项展开，例如：
+
+```typescript
+const finalOptions = {
+  ...options,
+  params: {
+    "code": params["code"],
+    "createBy": params["createBy"],
+    "createTime": params["createTime"],
+    // ...十几个字段
+  }
+};
+```
+
+字段一多就显得冗长，且没有任何信息增益 —— `params` 形参本身就是这些字段的集合。
+
+新版行为：
+
+- **V2**：当 params 接口字段**全部**是 query（无 path / body / formData）时，直接 `params: params`，跳过逐字段映射；存在 path / body / formData 时仍按原逻辑逐字段提取，避免把非 query 字段污染到 query string。
+- **V2**：完全无参数的接口，`finalOptions` 也会补一行 `params: params`，保持生成结构一致，便于调用方直接透传。
+- **V3**：完全无参数（无 query / path、也无 requestBody）的接口，补 `configs.params = params;`，避免 `params` 形参出现「声明但未使用」的告警；有 requestBody 但无 query / path 时仍按原逻辑通过 `params.body` / `params.formData` 引用，不再额外赋值。
+
+```typescript
+// V2 新行为示例（全 query 参数）
+const finalOptions = {
+  ...options,
+  params: params
+};
+
+// V2 新行为示例（完全无参数）
+const finalOptions = {
+  ...options,
+  params: params
+};
+```
+
+#### 技术变更
+
+- `generatorV2.ts` 重写 `optionsAssignment` 分支逻辑：新增 `canReuseParams` 判断（`pathParamNames.length === 0 && !hasBody && !hasFormData && queryParamNames.length === paramsProps.length`），命中时直接 `params: params`；无任何参数时也输出 `params: params`，不再走 `{ ...options }` 短路分支
+- `generatorV3.ts` 重写 `paramsAssign` 计算：新增 `hasRequestBody` 判断，条件改为 `hasQueryOrPathParameters || !hasRequestBody`，覆盖「完全无参数」的形参未使用场景
+
 ## [0.2.0] - 2026年5月25日
 
 #### 新增 `byControllerSingleFile` 输出拆分模式

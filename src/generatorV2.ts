@@ -491,13 +491,23 @@ export class ApiGenerator {
 
         let optionsAssignment = ""
 
-        if (queryParamNames.length > 0 || hasBody || hasFormData) {
+        {
           const parts: string[] = []
 
           // query → options.params
           if (queryParamNames.length > 0) {
-            const queryObject = `\n    {\n      ${queryParamNames.map((n) => `"${n}": params["${n}"]`).join(",\n      ")}\n    }`
-            parts.push(`params:${queryObject}`)
+            // 若 params 接口字段全部是 query（无 path/body/formData），直接复用 params，避免逐字段遍历
+            const canReuseParams =
+              pathParamNames.length === 0 && !hasBody && !hasFormData && queryParamNames.length === paramsProps.length
+            if (canReuseParams) {
+              parts.push(`params: params`)
+            } else {
+              const queryObject = `\n    {\n      ${queryParamNames.map((n) => `"${n}": params["${n}"]`).join(",\n      ")}\n    }`
+              parts.push(`params:${queryObject}`)
+            }
+          } else {
+            // 即使没有 query 参数，也保持 params 字段，便于调用方按需透传
+            parts.push(`params: params`)
           }
 
           // body or formData → options.data
@@ -508,8 +518,6 @@ export class ApiGenerator {
           }
 
           optionsAssignment = `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
-        } else {
-          optionsAssignment = "const finalOptions = { ...options };"
         }
 
         /** =-===========================end 处理params */
