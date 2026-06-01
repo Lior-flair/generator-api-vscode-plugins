@@ -505,8 +505,10 @@ export class ApiGenerator {
               const queryObject = `\n    {\n      ${queryParamNames.map((n) => `"${n}": params["${n}"]`).join(",\n      ")}\n    }`
               parts.push(`params:${queryObject}`)
             }
-          } else {
-            // 即使没有 query 参数，也保持 params 字段，便于调用方按需透传
+          } else if (!hasBody && !hasFormData && pathParamNames.length === 0) {
+            // 完全无参数（params 形参在方法体内不会被引用）时也补 params: params，
+            // 既避免未使用形参，也便于调用方按需透传；
+            // 注意：有 body/formData/path 时不补，否则会把非 query 字段污染到 query string
             parts.push(`params: params`)
           }
 
@@ -517,7 +519,10 @@ export class ApiGenerator {
             parts.push(`data: params["formData"]`)
           }
 
-          optionsAssignment = `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
+          optionsAssignment =
+            parts.length > 0
+              ? `const finalOptions = {\n  ...options,\n  ${parts.join(",\n  ")}\n};`
+              : "const finalOptions = { ...options };"
         }
 
         /** =-===========================end 处理params */

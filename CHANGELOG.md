@@ -1,5 +1,36 @@
 # Change Log
 
+## [0.2.2] - 2026年5月26日
+
+#### Bug 修复
+
+- **V2：只有 body 参数的接口被错误地把 body 当作 query string 传出去**：0.2.1 把「无 query 参数就补 `params: params`」放在了所有「无 query」分支上，导致只有 body 的接口（例如 `POST /sys/permission/edit`，参数仅一个 `body: SysPermission`）生成出：
+
+  ```typescript
+  const finalOptions = {
+    ...options,
+    params: params,           // ← 此处 params 形参实际形如 { body: SysPermission }
+    data: params["body"]
+  };
+  ```
+
+  axios 会把 `params.body` 当作 query string 序列化到 URL 上，造成请求异常。
+
+  新版行为：把「补 `params: params`」收紧到**真正完全无参数**（无 query / path / body / formData）的接口才生效；存在 body / formData / path 时，`params` 已通过 `data: params["body"]` / `${params.xxx}` 被引用，不再追加。
+
+  对应只有 body 的场景现在会生成：
+
+  ```typescript
+  const finalOptions = {
+    ...options,
+    data: params["body"]
+  };
+  ```
+
+#### 技术变更
+
+- `generatorV2.ts` 修正 `optionsAssignment` 分支：将「无 query 即补 params」收紧为 `!hasBody && !hasFormData && pathParamNames.length === 0` 才补；`parts` 为空时回退到 `const finalOptions = { ...options };`，避免出现尾随逗号
+
 ## [0.2.1] - 2026年5月26日
 
 #### 优化 `finalOptions` / `configs.params` 的生成形式
@@ -23,7 +54,7 @@ const finalOptions = {
 新版行为：
 
 - **V2**：当 params 接口字段**全部**是 query（无 path / body / formData）时，直接 `params: params`，跳过逐字段映射；存在 path / body / formData 时仍按原逻辑逐字段提取，避免把非 query 字段污染到 query string。
-- **V2**：完全无参数的接口，`finalOptions` 也会补一行 `params: params`，保持生成结构一致，便于调用方直接透传。
+- **V2**：完全无参数（无 query / path / body / formData）的接口，`finalOptions` 补一行 `params: params`，避免 `params` 形参出现「声明但未使用」的告警；存在 body / formData / path 时不补 —— 否则会把 body 等非 query 字段当作 query string 传出去。
 - **V3**：完全无参数（无 query / path、也无 requestBody）的接口，补 `configs.params = params;`，避免 `params` 形参出现「声明但未使用」的告警；有 requestBody 但无 query / path 时仍按原逻辑通过 `params.body` / `params.formData` 引用，不再额外赋值。
 
 ```typescript
