@@ -98,6 +98,7 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
     if (element.kind !== "section" || !element.profile) return []
     const profile = element.profile
     const outputLabel = profile.outputPath ? path.basename(profile.outputPath) : "未设置"
+    const splitLabel = profile.outputSplit || "跟随设置"
     const controllerLabel = profile.selectedControllers?.length
       ? `${profile.selectedControllers.length} 个`
       : "全部"
@@ -106,6 +107,7 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
       return [
         this.infoNode(`状态: ${this.statusText(profile)}`, profile, this.getStatusIcon(profile.status)),
         this.infoNode(`输出: ${outputLabel}`, profile, new vscode.ThemeIcon("folder")),
+        this.infoNode(`模式: ${splitLabel}`, profile, new vscode.ThemeIcon("split-horizontal")),
         this.infoNode(`Controller: ${controllerLabel}`, profile, new vscode.ThemeIcon("symbol-class")),
       ]
     }

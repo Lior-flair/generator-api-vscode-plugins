@@ -106,6 +106,15 @@
 - `信息`：只读展示状态、输出位置、Controller 范围。
 - `操作`：可点击命令，包括更新 API、检查变更、选择 Controller、设置输出位置、开启/关闭自动监听、设为默认、删除配置。
 
+`设置输出位置` 会根据该 API 配置中缓存的输出拆分模式自动决定选择文件或目录。旧配置没有缓存模式时，会回退读取当前 VS Code 设置中的 `generator-ts-api.outputSplit`。
+
+| 模式 | 输出位置 |
+|---|---|
+| `single` | 选择一个 `.ts` / `.js` 文件 |
+| `byTag` | 选择输出目录 |
+| `byController` | 选择输出目录 |
+| `byControllerSingleFile` | 选择输出目录 |
+
 #### URL 缓存
 
 `URL 缓存` 会展示历史使用过的 API 文档地址。
