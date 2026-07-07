@@ -3,7 +3,7 @@
   "displayName": "generator-ts-api",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -17,7 +17,26 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:generator-ts-api.profiles",
+    "onCommand:generator-ts-api.generate",
+    "onCommand:generator-ts-api.generateFromUrl",
+    "onCommand:generator-ts-api.generateFromFile",
+    "onCommand:generator-ts-api.generateMock",
+    "onCommand:generator-ts-api.generateRequestTemplate",
+    "onCommand:generator-ts-api.profile.addUrl",
+    "onCommand:generator-ts-api.profile.generateDefault",
+    "onCommand:generator-ts-api.profile.generate",
+    "onCommand:generator-ts-api.profile.check",
+    "onCommand:generator-ts-api.profile.pickOutput",
+    "onCommand:generator-ts-api.profile.pickControllers",
+    "onCommand:generator-ts-api.profile.toggleWatch",
+    "onCommand:generator-ts-api.profile.setDefault",
+    "onCommand:generator-ts-api.profile.delete",
+    "onCommand:generator-ts-api.history.edit",
+    "onCommand:generator-ts-api.history.copy",
+    "onCommand:generator-ts-api.history.delete"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -40,8 +59,124 @@
       {
         "command": "generator-ts-api.generateRequestTemplate",
         "title": "Generator TS API: 生成 Request 封装模板文件"
+      },
+      {
+        "command": "generator-ts-api.profile.addUrl",
+        "title": "Generator TS API: 新增 URL 配置",
+        "icon": "$(add)"
+      },
+      {
+        "command": "generator-ts-api.profile.generateDefault",
+        "title": "Generator TS API: 使用默认配置更新 API",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "generator-ts-api.profile.generate",
+        "title": "Generator TS API: 更新当前 API 配置"
+      },
+      {
+        "command": "generator-ts-api.profile.check",
+        "title": "Generator TS API: 检查 API 文档变更"
+      },
+      {
+        "command": "generator-ts-api.profile.pickOutput",
+        "title": "Generator TS API: 设置输出位置"
+      },
+      {
+        "command": "generator-ts-api.profile.pickControllers",
+        "title": "Generator TS API: 选择 Controller"
+      },
+      {
+        "command": "generator-ts-api.profile.toggleWatch",
+        "title": "Generator TS API: 开启/关闭自动监听"
+      },
+      {
+        "command": "generator-ts-api.profile.setDefault",
+        "title": "Generator TS API: 设为默认配置"
+      },
+      {
+        "command": "generator-ts-api.profile.delete",
+        "title": "Generator TS API: 删除 API 配置"
+      },
+      {
+        "command": "generator-ts-api.history.edit",
+        "title": "Generator TS API: 编辑缓存 URL",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "generator-ts-api.history.copy",
+        "title": "Generator TS API: 复制缓存 URL",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "generator-ts-api.history.delete",
+        "title": "Generator TS API: 删除缓存 URL",
+        "icon": "$(trash)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "generator-ts-api",
+          "title": "Generator API",
+          "icon": "eos-icons--api-outlined.svg"
+        }
+      ]
+    },
+    "views": {
+      "generator-ts-api": [
+        {
+          "id": "generator-ts-api.profiles",
+          "name": "API 文档"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "generator-ts-api.profile.addUrl",
+          "when": "view == generator-ts-api.profiles",
+          "group": "navigation"
+        },
+        {
+          "command": "generator-ts-api.profile.generateDefault",
+          "when": "view == generator-ts-api.profiles",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "generator-ts-api.history.edit",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "inline@1"
+        },
+        {
+          "command": "generator-ts-api.history.copy",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "inline@2"
+        },
+        {
+          "command": "generator-ts-api.history.delete",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "inline@3"
+        },
+        {
+          "command": "generator-ts-api.history.edit",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "navigation@1"
+        },
+        {
+          "command": "generator-ts-api.history.copy",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "navigation@2"
+        },
+        {
+          "command": "generator-ts-api.history.delete",
+          "when": "view == generator-ts-api.profiles && viewItem == apiHistoryItem",
+          "group": "navigation@3"
+        }
+      ]
+    },
     "configuration": [
       {
         "title": "Generator TS API · API 文档来源",
@@ -189,6 +324,17 @@
             "type": "boolean",
             "default": false,
             "description": "【仅 byControllerSingleFile 模式生效】为 true 时，被两个及以上控制器共用的类型会被抽离到共享类型目录，控制器文件改为 import 引入；仅被单个控制器使用的类型仍内联在该控制器文件内。可避免共用类型在多个文件中重复"
+          }
+        }
+      },
+      {
+        "title": "Generator TS API · 面板与监听",
+        "properties": {
+          "generator-ts-api.watch.intervalSeconds": {
+            "type": "number",
+            "default": 120,
+            "minimum": 60,
+            "description": "侧边栏 API 配置开启自动监听后，检查后端文档变更的间隔秒数。最低 60 秒"
           }
         }
       },

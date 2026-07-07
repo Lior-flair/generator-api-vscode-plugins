@@ -1,5 +1,64 @@
 # Change Log
 
+## [0.2.3] - 2026年7月7日
+
+#### 新增侧边栏 API 面板
+
+- 新增 VS Code Activity Bar 入口 **Generator API**，左侧面板展示当前工作区的 API 配置档案与 URL 缓存。
+- API 配置档案支持保存：
+  - API 文档来源（URL）
+  - 输出路径与输出拆分模式
+  - 选中的 Controller
+  - 自动监听开关
+  - 最近一次文档 hash、检查时间、生成时间与状态
+- 配置项下分为两组：
+  - **信息**：只读展示状态、输出位置、Controller 选择范围。
+  - **操作**：更新 API、检查变更、选择 Controller、设置输出位置、开启/关闭自动监听、设为默认、删除配置。
+
+#### URL 缓存增强
+
+- URL 历史缓存现在会在侧边栏中展示。
+- 点击缓存 URL 可直接基于该 URL 新增 API 配置。
+- 缓存项支持编辑、复制、删除；编辑可修改显示名称和 URL。
+- 通过右上角 `+` 新增配置后，会立即写入 URL 缓存并刷新面板。
+
+#### 输出路径复用
+
+- 使用面板中的 API 配置生成时，会优先复用上一次保存的输出路径。
+- 首次生成或输出路径缺失时才会弹出文件/目录选择框，解决每次生成都要重新选择保存路径的问题。
+- 最近使用的配置会自动设为默认配置，可通过命令 `Generator TS API: 使用默认配置更新 API` 一键更新。
+
+#### 文档状态与变更检测
+
+- 新增手动检查变更：拉取/读取文档后计算稳定 hash，用于判断后端文档是否变动。
+- 面板状态支持：
+  - 在线
+  - 离线
+  - 有变动
+  - 无变动
+  - 未知
+- 自动监听为轻量轮询，默认由每个配置单独开启；轮询间隔由 `generator-ts-api.watch.intervalSeconds` 控制，最低 60 秒。
+
+#### Controller 选择生成
+
+- 支持在面板中选择要生成的 Controller。
+- 不选择时默认生成全部 Controller。
+- 第一版先按 OpenAPI/Swagger operation 的 `tags[0]` 过滤 Controller 对应接口；类型定义仍保留完整集合，后续可继续做按依赖闭包裁剪类型。
+
+#### UI 与图标优化
+
+- 修复 TreeView 中 `$(sync)` / `$(pulse)` 等 Codicon 字符串原样显示的问题，改为真正的 `ThemeIcon`。
+- 状态图标增加颜色区分：在线/无变动为绿色，离线为红色，有变动为黄色。
+- Activity Bar 图标改为 `eos-icons--api-outlined.svg`。
+
+#### 技术变更
+
+- 新增 `src/profileManager.ts`：负责工作区 API 配置档案的读取、更新、删除与默认配置管理。
+- 新增 `src/apiPanel.ts`：实现侧边栏 TreeView。
+- 新增 `src/docUtils.ts`：实现稳定 hash、Controller 名称提取和按 Controller 过滤文档。
+- `package.json` 新增 `viewsContainers` / `views` / `view/title` / `view/item/context` 贡献点，以及侧边栏相关命令。
+- `package.json` 新增配置 `generator-ts-api.watch.intervalSeconds`。
+
 ## [0.2.2] - 2026年5月26日
 
 #### Bug 修复

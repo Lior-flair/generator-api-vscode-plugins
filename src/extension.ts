@@ -6,6 +6,9 @@ import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
 import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
+import { ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
+import { filterApiDocsByControllers, getApiDocHash, getControllerNames } from "./docUtils"
+import { ApiProfile, ApiProfileManager, createProfileId } from "./profileManager"
 import {
   type CompatibilityVersion,
   type FormatTypeMappings,
@@ -13,6 +16,7 @@ import {
   buildRequestTemplateContent,
   type HttpClientConfig,
   type HttpClientMode,
+  type NamingConfig,
   type SplitOutputResult,
 } from "./generatorCommon"
 
@@ -32,6 +36,17 @@ function buildSuccessMessage(result: SplitOutputResult | void): string {
     return `API 代码生成成功！共 ${result.controllerCount} 个控制器、${result.typeCount} 个类型，写入 ${result.fileCount} 个文件`
   }
   return "API 代码生成成功！"
+}
+
+function buildNamingConfig(config: vscode.WorkspaceConfiguration): NamingConfig {
+  return {
+    typesDirName: (config.get("naming.typesDirName") as string) || "types",
+    controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
+    controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
+    controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+    methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
+    typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
+  }
 }
 
 interface HistoryItem {
@@ -106,6 +121,13 @@ export function activate(context: vscode.ExtensionContext) {
   const apiGeneratorV3 = new ApiGeneratorV3()
   const apiGeneratorV2 = new ApiGeneratorV2()
   const apiParser = new ApiParser()
+  const profileManager = new ApiProfileManager(context)
+  const apiPanelProvider = new ApiPanelProvider(profileManager, () => urlHistory)
+  const apiPanelTree = vscode.window.createTreeView("generator-ts-api.profiles", {
+    treeDataProvider: apiPanelProvider,
+    showCollapseAll: true,
+  })
+  context.subscriptions.push(apiPanelTree)
 
   // 从扩展存储中加载历史记录，兼容旧版 string[] 格式
   const rawHistory = context.globalState.get<any[]>("urlHistory")
@@ -122,6 +144,7 @@ export function activate(context: vscode.ExtensionContext) {
     urlHistory.unshift({ url, name: existing?.name, swaggerVersion: swaggerVersion || existing?.swaggerVersion })
     if (urlHistory.length > MAX_HISTORY_LENGTH) urlHistory = urlHistory.slice(0, MAX_HISTORY_LENGTH)
     context.globalState.update("urlHistory", urlHistory)
+    apiPanelProvider.refresh()
   }
 
   const EDIT_BTN: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon("edit"), tooltip: "编辑名称" }
@@ -182,6 +205,7 @@ export function activate(context: vscode.ExtensionContext) {
           urlHistory = urlHistory.filter((h) => h.url !== histItem.url)
           context.globalState.update("urlHistory", urlHistory)
           quickPick.items = buildHistoryItems()
+          apiPanelProvider.refresh()
         } else if (button === EDIT_BTN) {
           suppressHideResolve = true
           quickPick.hide()
@@ -195,6 +219,7 @@ export function activate(context: vscode.ExtensionContext) {
           if (newName !== undefined) {
             histItem.name = newName.trim() || undefined
             context.globalState.update("urlHistory", urlHistory)
+            apiPanelProvider.refresh()
           }
           quickPick.items = buildHistoryItems()
           quickPick.show()
@@ -214,6 +239,273 @@ export function activate(context: vscode.ExtensionContext) {
       throw new Error("不支持的API文档版本")
     }
   }
+
+  const pickOutputPath = async (outputSplit: string, outputType: string): Promise<string | undefined> => {
+    if (outputSplit !== "single") {
+      const folderUri = await vscode.window.showOpenDialog({
+        title: "选择输出目录（多文件拆分）",
+        canSelectFolders: true,
+        canSelectFiles: false,
+        canSelectMany: false,
+        openLabel: "选择输出目录",
+      })
+      return folderUri?.[0]?.fsPath
+    }
+    const outputPath = await vscode.window.showSaveDialog({
+      title: "选择输出文件位置",
+      filters: outputType === "js" ? { JavaScript: ["js"] } : { TypeScript: ["ts"] },
+    })
+    return outputPath?.fsPath
+  }
+
+  const loadProfileDocs = async (profile: ApiProfile): Promise<any> => {
+    if (profile.sourceType === "url" && profile.url) {
+      return apiParser.parseFromUrl(profile.url)
+    }
+    if (profile.sourceType === "file" && profile.filePath) {
+      return apiParser.parseFromFile(profile.filePath)
+    }
+    throw new Error("API 配置缺少文档来源")
+  }
+
+  const generateProfile = async (profile: ApiProfile, forcePickOutput = false): Promise<void> => {
+    const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+    loading.text = "$(sync~spin) 拉取 API 文档..."
+    loading.show()
+    try {
+      const config = vscode.workspace.getConfiguration("generator-ts-api")
+      const framework = config.get("framework") as string
+      const outputType = config.get("outputType") as string
+      const outputSplit = profile.outputSplit || ((config.get("outputSplit") as string) || "single")
+      let outputFsPath = forcePickOutput ? undefined : profile.outputPath
+      if (!outputFsPath) {
+        outputFsPath = await pickOutputPath(outputSplit, outputType)
+      }
+      if (!outputFsPath) return
+
+      const apiDocs = await loadProfileDocs(profile)
+      const docHash = getApiDocHash(apiDocs)
+      const filteredDocs = filterApiDocsByControllers(apiDocs, profile.selectedControllers)
+      const generator = getGenerator(filteredDocs)
+      loading.text = "$(sync~spin) 生成代码中..."
+      const httpClientConfig = buildHttpClientConfig(config)
+      const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
+      const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
+      const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
+      const genResult = await generator.generate(
+        filteredDocs,
+        framework,
+        outputType,
+        outputFsPath,
+        outputSplit,
+        buildNamingConfig(config),
+        httpClientConfig,
+        cleanOutputDir,
+        byControllerLocalTypes,
+        extractSharedTypes
+      )
+      maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
+      await profileManager.updateProfile(profile.id, {
+        outputPath: outputFsPath,
+        outputSplit,
+        lastDocHash: docHash,
+        lastCheckedAt: Date.now(),
+        lastGeneratedAt: Date.now(),
+        status: "online",
+        statusMessage: "生成成功",
+      })
+      await profileManager.setDefaultProfile(profile.id)
+      if (profile.url) {
+        saveUrlToHistory(profile.url, typeof (apiDocs.openapi || apiDocs.swagger) === "string" ? (apiDocs.openapi || apiDocs.swagger) : undefined)
+      }
+      apiPanelProvider.refresh()
+      vscode.window.showInformationMessage(buildSuccessMessage(genResult))
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "未知错误"
+      logError("Profile 生成失败:", error instanceof Error ? error.stack || error.message : error)
+      await profileManager.updateProfile(profile.id, {
+        status: "offline",
+        statusMessage: errorMessage,
+        lastCheckedAt: Date.now(),
+      })
+      apiPanelProvider.refresh()
+      vscode.window.showErrorMessage(`生成API文档失败: ${errorMessage}`)
+    } finally {
+      try { loading.hide(); loading.dispose() } catch (_) { /* ignore */ }
+      try { ;(globalThis as any)._controllerMethodNames = {} } catch (_) { /* ignore */ }
+    }
+  }
+
+  const checkProfile = async (profile: ApiProfile, silent = false): Promise<ApiProfile | undefined> => {
+    try {
+      const apiDocs = await loadProfileDocs(profile)
+      const docHash = getApiDocHash(apiDocs)
+      const status = profile.lastDocHash && profile.lastDocHash !== docHash ? "changed" : "unchanged"
+      const next = await profileManager.updateProfile(profile.id, {
+        lastDocHash: profile.lastDocHash || docHash,
+        lastCheckedAt: Date.now(),
+        status,
+        statusMessage: status === "changed" ? "后端文档有变动" : "后端文档无变动",
+      })
+      apiPanelProvider.refresh()
+      if (!silent) {
+        vscode.window.showInformationMessage(status === "changed" ? "API 文档有变动" : "API 文档无变动")
+      }
+      return next
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "未知错误"
+      const next = await profileManager.updateProfile(profile.id, {
+        status: "offline",
+        statusMessage: errorMessage,
+        lastCheckedAt: Date.now(),
+      })
+      apiPanelProvider.refresh()
+      if (!silent) vscode.window.showErrorMessage(`检查 API 文档失败: ${errorMessage}`)
+      return next
+    }
+  }
+
+  const addProfileFromUrl = async (url: string, defaultName?: string): Promise<void> => {
+    const name = await vscode.window.showInputBox({
+      title: "新增 API 配置",
+      prompt: "填写面板中显示的名称",
+      value: defaultName || urlHistory.find((item) => item.url === url)?.name || "后端 API",
+      ignoreFocusOut: true,
+    })
+    if (name === undefined) return
+    const config = vscode.workspace.getConfiguration("generator-ts-api")
+    const profile: ApiProfile = {
+      id: createProfileId(),
+      name: name.trim() || url,
+      sourceType: "url",
+      url,
+      outputSplit: ((config.get("outputSplit") as string) || "single"),
+      autoWatch: false,
+      status: "unknown",
+    }
+    await profileManager.upsertProfile(profile)
+    await profileManager.setDefaultProfile(profile.id)
+    saveUrlToHistory(url)
+    apiPanelProvider.refresh()
+  }
+
+  const addUrlProfile = async (): Promise<void> => {
+    const url = await showUrlHistoryQuickPick()
+    if (!url) return
+    await addProfileFromUrl(url)
+  }
+
+  const copyHistoryItem = async (item: ApiHistoryItem): Promise<void> => {
+    await vscode.env.clipboard.writeText(item.url)
+    vscode.window.showInformationMessage("URL 已复制到剪切板")
+  }
+
+  const deleteHistoryItem = async (item: ApiHistoryItem): Promise<void> => {
+    const confirm = await vscode.window.showWarningMessage(
+      `删除缓存 URL "${item.name || item.url}"？`,
+      { modal: true },
+      "删除"
+    )
+    if (confirm !== "删除") return
+    urlHistory = urlHistory.filter((history) => history.url !== item.url)
+    await context.globalState.update("urlHistory", urlHistory)
+    apiPanelProvider.refresh()
+  }
+
+  const editHistoryItem = async (item: ApiHistoryItem): Promise<void> => {
+    const name = await vscode.window.showInputBox({
+      title: "编辑缓存名称",
+      prompt: "留空则使用 URL 作为显示名称",
+      value: item.name || "",
+      ignoreFocusOut: true,
+    })
+    if (name === undefined) return
+    const url = await vscode.window.showInputBox({
+      title: "编辑缓存 URL",
+      prompt: "修改 API 文档 URL",
+      value: item.url,
+      ignoreFocusOut: true,
+    })
+    if (url === undefined) return
+    const trimmedUrl = url.trim()
+    if (!trimmedUrl) {
+      vscode.window.showErrorMessage("URL 不能为空")
+      return
+    }
+    urlHistory = urlHistory.filter((history) => history.url !== item.url && history.url !== trimmedUrl)
+    urlHistory.unshift({
+      url: trimmedUrl,
+      name: name.trim() || undefined,
+      swaggerVersion: item.swaggerVersion,
+    })
+    if (urlHistory.length > MAX_HISTORY_LENGTH) urlHistory = urlHistory.slice(0, MAX_HISTORY_LENGTH)
+    await context.globalState.update("urlHistory", urlHistory)
+    apiPanelProvider.refresh()
+  }
+
+  const pickProfileOutput = async (profile: ApiProfile): Promise<void> => {
+    const config = vscode.workspace.getConfiguration("generator-ts-api")
+    const outputType = config.get("outputType") as string
+    const outputSplit = profile.outputSplit || ((config.get("outputSplit") as string) || "single")
+    const outputPath = await pickOutputPath(outputSplit, outputType)
+    if (!outputPath) return
+    await profileManager.updateProfile(profile.id, { outputPath, outputSplit })
+    apiPanelProvider.refresh()
+  }
+
+  const pickProfileControllers = async (profile: ApiProfile): Promise<void> => {
+    const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
+    loading.text = "$(sync~spin) 读取 Controller..."
+    loading.show()
+    try {
+      const apiDocs = await loadProfileDocs(profile)
+      const controllerNames = getControllerNames(apiDocs)
+      const selected = await vscode.window.showQuickPick(
+        controllerNames.map((name) => ({
+          label: name,
+          picked: profile.selectedControllers?.includes(name) || false,
+        })),
+        {
+          title: "选择要生成的 Controller",
+          placeHolder: "不选择表示生成全部 Controller",
+          canPickMany: true,
+          matchOnDescription: true,
+        }
+      )
+      if (!selected) return
+      await profileManager.updateProfile(profile.id, {
+        selectedControllers: selected.length > 0 ? selected.map((item) => item.label) : undefined,
+        lastCheckedAt: Date.now(),
+        lastDocHash: getApiDocHash(apiDocs),
+        status: "online",
+        statusMessage: "Controller 已更新",
+      })
+      apiPanelProvider.refresh()
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "未知错误"
+      vscode.window.showErrorMessage(`读取 Controller 失败: ${errorMessage}`)
+    } finally {
+      try { loading.hide(); loading.dispose() } catch (_) { /* ignore */ }
+    }
+  }
+
+  let watchTimer: NodeJS.Timeout | undefined
+  const refreshWatchTimer = () => {
+    if (watchTimer) clearInterval(watchTimer)
+    const watchedProfiles = profileManager.getProfiles().filter((profile) => profile.autoWatch)
+    if (watchedProfiles.length === 0) {
+      watchTimer = undefined
+      return
+    }
+    const config = vscode.workspace.getConfiguration("generator-ts-api")
+    const intervalSeconds = Math.max((config.get("watch.intervalSeconds") as number) || 120, 60)
+    watchTimer = setInterval(() => {
+      for (const profile of profileManager.getProfiles().filter((item) => item.autoWatch)) {
+        checkProfile(profile, true)
+      }
+    }, intervalSeconds * 1000)
+  }
+  refreshWatchTimer()
 
   // The command has been defined in the package.json file
   // Now provide the implementation of the command with registerCommand
@@ -770,12 +1062,117 @@ export function activate(context: vscode.ExtensionContext) {
     }
   )
 
+  const addUrlProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.addUrl",
+    addUrlProfile
+  )
+
+  const addProfileFromHistoryCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.addFromHistory",
+    async (item: ApiHistoryItem) => addProfileFromUrl(item.url, item.name)
+  )
+
+  const editHistoryItemCommand = vscode.commands.registerCommand(
+    "generator-ts-api.history.edit",
+    async (item: ApiHistoryItem) => editHistoryItem(item)
+  )
+
+  const copyHistoryItemCommand = vscode.commands.registerCommand(
+    "generator-ts-api.history.copy",
+    async (item: ApiHistoryItem) => copyHistoryItem(item)
+  )
+
+  const deleteHistoryItemCommand = vscode.commands.registerCommand(
+    "generator-ts-api.history.delete",
+    async (item: ApiHistoryItem) => deleteHistoryItem(item)
+  )
+
+  const generateDefaultProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.generateDefault",
+    async () => {
+      const profile = profileManager.getDefaultProfile()
+      if (!profile) {
+        await addUrlProfile()
+        return
+      }
+      await generateProfile(profile)
+    }
+  )
+
+  const generateProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.generate",
+    async (profile: ApiProfile) => generateProfile(profile)
+  )
+
+  const checkProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.check",
+    async (profile: ApiProfile) => checkProfile(profile)
+  )
+
+  const pickProfileOutputCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.pickOutput",
+    async (profile: ApiProfile) => pickProfileOutput(profile)
+  )
+
+  const pickProfileControllersCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.pickControllers",
+    async (profile: ApiProfile) => pickProfileControllers(profile)
+  )
+
+  const toggleProfileWatchCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.toggleWatch",
+    async (profile: ApiProfile) => {
+      await profileManager.updateProfile(profile.id, { autoWatch: !profile.autoWatch })
+      refreshWatchTimer()
+      apiPanelProvider.refresh()
+    }
+  )
+
+  const setDefaultProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.setDefault",
+    async (profile: ApiProfile) => {
+      await profileManager.setDefaultProfile(profile.id)
+      apiPanelProvider.refresh()
+    }
+  )
+
+  const deleteProfileCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.delete",
+    async (profile: ApiProfile) => {
+      const confirm = await vscode.window.showWarningMessage(
+        `删除 API 配置 "${profile.name}"？`,
+        { modal: true },
+        "删除"
+      )
+      if (confirm !== "删除") return
+      await profileManager.deleteProfile(profile.id)
+      refreshWatchTimer()
+      apiPanelProvider.refresh()
+    }
+  )
+
   context.subscriptions.push(
     generateCommand,
     generateFromUrlCommand,
     generateFromFileCommand,
     generateMockCommand,
-    generateRequestTemplateCommand
+    generateRequestTemplateCommand,
+    addUrlProfileCommand,
+    addProfileFromHistoryCommand,
+    editHistoryItemCommand,
+    copyHistoryItemCommand,
+    deleteHistoryItemCommand,
+    generateDefaultProfileCommand,
+    generateProfileCommand,
+    checkProfileCommand,
+    pickProfileOutputCommand,
+    pickProfileControllersCommand,
+    toggleProfileWatchCommand,
+    setDefaultProfileCommand,
+    deleteProfileCommand,
+    new vscode.Disposable(() => {
+      if (watchTimer) clearInterval(watchTimer)
+    })
   )
 }
 

@@ -29,6 +29,18 @@
 - ✅ 自动生成请求方法（按配置切换风格）
 - ✅ 支持自定义模板扩展
 
+### 3) 侧边栏 API 面板
+- ✅ 左侧 Activity Bar 提供 `Generator API` 面板
+- ✅ 按工作区保存 API 配置档案，复用上次选择的后端文档与输出路径
+- ✅ 展示文档状态：在线 / 离线 / 有变动 / 无变动 / 未知
+- ✅ 支持手动检查变更、点击更新 API、开启/关闭自动监听
+- ✅ URL 缓存列表支持展示、编辑、复制、删除，并可一键基于缓存新增配置
+
+### 4) Controller 选择生成
+- ✅ 可在面板中选择要生成的 Controller
+- ✅ 不选择时生成全部 Controller
+- ✅ 适合大型后端文档按业务模块生成，减少不必要的 Controller 输出
+
 ### 5) Mock 数据生成
 - ✅ 基于 `example` / `default` 字段优先生成真实 Mock 值
 - ✅ 按 `format`（date-time、email、uuid…）与字段名语义自动合成
@@ -46,12 +58,12 @@
 - ✅ 默认模式自动将特殊符号替换为下划线 `_`，确保生成代码可编译
 - ✅ 支持直接替换 import 路径（`directReplacementRequestImportPath`），完全自定义 import 语句
 
-### 3) 类型与结构处理
+### 8) 类型与结构处理
 - ✅ 常见 OpenAPI 类型推导
 - ✅ 请求/响应结构映射
 - ✅ 错误信息透出，便于排查
 
-### 4) 输出格式
+### 9) 输出格式
 - ✅ TypeScript（`.ts`）
 - ✅ JavaScript（`.js`）
 
@@ -66,11 +78,61 @@
 
 ### 快速开始
 1. 在 VS Code 中打开你的前端项目。
-2. 打开命令面板（Windows/Linux：`Ctrl + Shift + P`，macOS：`Cmd + Shift + P`）。
-3. 执行对应命令（URL / File）。
-4. 选择 API 文档来源。
-5. 选择输出文件或输出目录。
-6. 完成生成并在项目中引用。
+2. 点击左侧 Activity Bar 的 `Generator API` 图标，打开 `API 文档` 面板。
+3. 点击面板右上角 `+`，新增一个 URL 配置。
+4. 首次点击 `更新 API` 时选择输出文件或输出目录；之后会自动复用该路径。
+5. 如只想生成部分模块，进入该配置的 `操作` -> `选择 Controller`。
+6. 后续可直接点击 `更新 API`，或使用 `检查变更` 查看后端文档是否变化。
+
+你也可以继续使用命令面板（Windows/Linux：`Ctrl + Shift + P`，macOS：`Cmd + Shift + P`）执行传统 URL / File 生成命令。
+
+### 侧边栏面板说明
+
+面板分为两部分：
+
+#### API 配置
+
+每个 API 配置会保存当前工作区的一组生成上下文：
+
+- 文档来源 URL
+- 输出路径
+- 输出拆分模式
+- 选中的 Controller
+- 自动监听开关
+- 最近一次检查/生成状态
+
+配置节点下分为两组：
+
+- `信息`：只读展示状态、输出位置、Controller 范围。
+- `操作`：可点击命令，包括更新 API、检查变更、选择 Controller、设置输出位置、开启/关闭自动监听、设为默认、删除配置。
+
+#### URL 缓存
+
+`URL 缓存` 会展示历史使用过的 API 文档地址。
+
+- 点击缓存项：基于该 URL 新增一个 API 配置。
+- 编辑：修改缓存名称和 URL。
+- 复制：复制 URL 到剪切板。
+- 删除：从缓存列表移除。
+
+### 文档状态说明
+
+| 状态 | 含义 |
+|---|---|
+| 在线 | 文档可访问，最近生成成功 |
+| 离线 | 拉取或解析失败 |
+| 有变动 | 当前文档 hash 与上次记录不一致 |
+| 无变动 | 当前文档 hash 与上次记录一致 |
+| 未知 | 尚未检查或尚未生成 |
+
+### 自动监听
+
+自动监听是对远程 URL 的轻量轮询检查，不会默认开启。你可以在配置的 `操作` 中开启/关闭。
+
+- 轮询只负责检查文档 hash 是否变化。
+- 检测到变化后，面板状态会显示为 `有变动`。
+- 需要生成时点击 `更新 API`。
+- 轮询间隔由 `generator-ts-api.watch.intervalSeconds` 控制，默认 120 秒，最低 60 秒。
 
 ### 命令列表
 - `generator-ts-api.generate`：按当前配置生成
@@ -78,6 +140,13 @@
 - `generator-ts-api.generateFromFile`：从本地文件读取并生成
 - `generator-ts-api.generateMock`：生成 Mock 数据（JSON / MSW / json-server）
 - `generator-ts-api.generateRequestTemplate`：独立生成封装 Request 模板文件
+- `generator-ts-api.profile.addUrl`：新增 URL 配置
+- `generator-ts-api.profile.generateDefault`：使用默认 API 配置更新
+- `generator-ts-api.profile.generate`：更新当前 API 配置
+- `generator-ts-api.profile.check`：检查 API 文档变更
+- `generator-ts-api.profile.pickOutput`：设置输出位置
+- `generator-ts-api.profile.pickControllers`：选择要生成的 Controller
+- `generator-ts-api.profile.toggleWatch`：开启/关闭自动监听
 
 ### 导出示例
 
@@ -178,6 +247,23 @@ export interface UserVO {
 ### VS Code 设置
 [配置项速查](./Releases.md)
 
+常用配置：
+
+| 配置项 | 默认值 | 说明 |
+|---|---:|---|
+| `generator-ts-api.apiDocsUrl` | `""` | API 文档 URL，传统命令 `generate` 使用 |
+| `generator-ts-api.apiDocsPath` | `""` | 本地 JSON / YAML 文档路径 |
+| `generator-ts-api.outputType` | `ts` | 输出 `ts` 或 `js` |
+| `generator-ts-api.outputSplit` | `single` | 输出拆分策略：单文件、按 Tag、按 Controller、每个 Controller 单文件 |
+| `generator-ts-api.cleanOutputDir` | `false` | 多文件输出前清理插件生成的旧目录/文件 |
+| `generator-ts-api.watch.intervalSeconds` | `120` | 面板自动监听的轮询间隔，最低 60 秒 |
+
+面板中的 API 配置档案存储在当前工作区的 `workspaceState`，URL 历史缓存存储在扩展的 `globalState`：
+
+- 同一个工作区会记住自己的 API 配置和输出路径。
+- 不同工作区可以拥有不同的默认 API 配置。
+- URL 缓存是全局共享的，方便跨项目复用常用后端文档地址。
+
 ## 贡献指南
 
 欢迎提交 Issue 和 Pull Request 来帮助改进这个项目。
@@ -236,11 +322,11 @@ export interface UserVO {
 | ^                      | **请求 Hooks 封装生成**      | 除基础请求外，自动生成 React `SWR`/`React-Query` 或 Vue3 `Composables` 代码 | 深度集成主流前端框架，直接去掉大量样板代码                   |
 | ^                      | **远程带鉴权拉取**           | 支持通过配置携带 Header（Token/Cookie）来请求被保护的线上 OpenAPI/Swagger JSON | 能够顺利访问企业内部加锁/需要登录的接口平台                  |
 | ^                      | **自动代码格式化**           | 生成后自动调用当前工作区的 `Prettier` 或 `ESLint` 进行后处理 | 防止生成的代码出现大量 Lint 报错导致 CI 阻塞                 |
-| **编辑器体验 (UI/UX)** | **侧边栏 API 树视图**        | 在 VS Code 侧边栏独立面板中，按树状结构渲染解析到的所有 API  | 允许开发者直观浏览，并支持**右键按需勾选生成**单个或部分接口 |
+| **编辑器体验 (UI/UX)** | **侧边栏 API 树视图**        | 在 VS Code 侧边栏独立面板中管理 API 配置、URL 缓存、状态检查与更新 | 允许开发者复用配置、减少重复选择，并按 Controller 生成 | ✅ |
 | ^                      | **生成前差异比对 (Diff)**    | 触发全量生成前，通过 VS Code 可视化对比工具（Diff View）展示新旧代码变化 | 避免不小心把开发者手动修改的代码直接覆盖冲掉                 |
 | ^                      | **智能悬浮提示 (Hover)**     | 识别代码里出现的 API 路径（如 `"/api/user"`），悬浮时弹窗显示接口的入参/出参结构 | 提高研发连贯性，不用频繁切换浏览器去查阅文档                 |
 | ^                      | **多步引导面板 (QuickPick)** | 提供快捷步骤引导项：执行命令 -> 选版本 -> 选模块 -> 选路径   | 极大降低新接手团队成员的学习和配置成本                       |
-| **自动化提升**         | **文件变更监听 (Watch)**     | 启用后台服务监听本地 `swagger.json` 的更新，自动热重载生成最新 TS 代码 | 一旦接口变动立刻同步到代码层，防止旧接口引发线上 Bug         |
+| **自动化提升**         | **文档变更监听 (Watch)**     | 对远程 API 文档做轻量轮询，检测 hash 变化并更新面板状态 | 及时发现接口变动，避免旧接口引发问题 | ✅ |
 
 
 
@@ -252,6 +338,9 @@ export interface UserVO {
 | ^      | ^                  | 支持2.x版本文档解析                                          | ^          | ^                              | P00    | ✅    | ✅           |
 | 功能   | Mock 数据生成      | json / MSW handlers / json-server 三种格式；example 优先，按 format / 字段名语义合成 | 中 | 文档无 example 时合成值需人工校对 | P1 | ✅ | — |
 | 功能   | Request 模板生成   | 独立命令按模式生成 request.ts/js，含拦截器、getConfigs、export default | 低 | — | P1 | ✅ | ✅ |
+| 功能   | 侧边栏 API 面板    | 工作区 API 配置档案、URL 缓存、状态检查、默认配置、一键更新 | 中 | TreeView 交互能力有限 | P1 | ✅ | ✅ |
+| 功能   | Controller 选择生成 | 按 operation tag 选择 Controller 生成；未选择时生成全部 | 中 | 类型裁剪需继续做依赖闭包 | P1 | ✅ | ✅ |
+| 自动化 | 远程文档变更监听   | 对配置的 URL 做轮询 hash 检查，显示有变动/无变动/离线状态 | 中 | 频繁请求后端、鉴权过期 | P2 | ✅ | ✅ |
 | 配置   | HTTP 客户端适配    | 支持 axios/fetch/自定义模板三档；可配置 request 导入路径、拦截器注入位 | 中         | 各项目请求封装差异大           | P1     | ✅    | ✅           |
 | 配置   | 类型映射 TypeMap   | 支持 int64→string、date-time→string/Date、binary→Blob；允许覆盖默认映射 | 低-中      | 历史代码类型变更导致编译告警   | P1     | ✅    | ✅           |
 | 配置   | 输出拆分策略       | 单文件 / 按 tag 分文件 / 按模块分目录；可配置文件名规则      | 中         | 导入路径和覆盖策略复杂         | P1     | ✅    | ✅           |
@@ -262,9 +351,9 @@ export interface UserVO {
 | 功能   | 认证增强           | URL 拉取支持 Bearer、Basic、自定义 Header；失败重试与历史记忆 | 中         | 凭证安全与日志脱敏             | P2     |      |             |
 | 功能   | 生成后格式化       | 可选执行 Prettier/ESLint fix；失败不阻断生成，仅告警         | 低         | 工作区未安装格式化器           | P2     |      |             |
 | UX     | 生成前 Diff 预览   | 若目标文件已存在，先展示差异再确认覆盖                       | 中         | 大文件 Diff 性能               | P2     |      |             |
-| UX     | 向导式 QuickPick   | 版本选择→范围选择→输出目录→确认；保留上次选择                | 中         | 步骤过多影响熟练用户效率       | P3     |      |             |
+| UX     | 向导式 QuickPick / TreeView | 面板管理配置，QuickPick 选择 URL / Controller，保留上次选择 | 中 | 步骤过多影响熟练用户效率 | P3 | ✅ | ✅ |
 | UX     | 错误分级展示       | 弹窗短错误 + 输出通道详细堆栈；网络错误给操作建议            | 低         | 敏感信息泄露                   | P1     |      |             |
-| 自动化 | Watch 模式         | 监听本地文档变化自动增量生成；防抖+并发锁                    | 中         | 高频改动导致重复写盘           | P2     |      |             |
+| 自动化 | Watch 模式         | 远程文档轮询检查 hash 变化；自动生成暂不默认启用             | 中         | 高频检查、重复写盘             | P2     | ✅    | ✅           |
 | 自动化 | 回归测试快照       | V2/V3 固定输入快照，断言签名/类型片段稳定性                  | 中         | 时间戳等非稳定内容干扰         | P1     |      |             |
 | 自动化 | 文档一致性校验     | README 配置项与插件声明配置项做一致性检查                    | 低         | 文档更新滞后                   | P3     |      |             |
 
