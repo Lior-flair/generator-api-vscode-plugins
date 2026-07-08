@@ -1,5 +1,29 @@
 # Change Log
 
+## [0.3.3] - 2026年7月8日
+
+#### 面板配置分组
+
+- 侧边栏 `配置` 内容由平铺列表改为按功能分组展示，减少配置项较多时的阅读压力。
+- 新增分组：`文档来源`、`生成输出`、`HTTP 客户端`、`命名规范`、`类型与拆分`、`面板监听`。
+- `Controller 命名映射` 移入 `命名规范` 分组下，继续按默认 API 文档的 `tags[].name` 展开显示映射 key/value。
+- 面板配置展示补充 `apiDocsPath` 与 `watch.intervalSeconds`，使显示项与实际 settings 更完整。
+
+#### 面板展开状态与映射展示
+
+- `URL 缓存` 与 `配置` 根节点改为默认收起，减少侧边栏初始展开内容。
+- `配置` -> `命名规范` 下新增展开式 `Controller 命名映射` 节点，不再只把 `controllerNameMap` 作为 JSON 对象展示。
+- `Controller 命名映射` 会读取默认 API 配置对应的 API 文档，按 `apiDocs.tags[].name` 展示映射 key。
+- 如果当前 settings 中的 `generator-ts-api.naming.controllerNameMap` 存在对应 key，则在映射项右侧展示 value；没有对应 key 时 value 为空，便于补齐中文 tag 到英文 Controller 名的映射。
+
+#### Controller 英文命名策略
+
+- 新增 `generator-ts-api.naming.controllerNameStrategy`，拆分输出时可选择使用 `tags.name`、`tags.description` 或 `auto` 策略生成 Controller 文件名和 Class 名。
+- `auto` 策略在 `tags.name` 含中文且 `tags.description` 是英文标识风格时使用 description；否则回退 name。
+- 新增 `generator-ts-api.naming.controllerNameMap`，可为不规范的 tag 手动指定生成用英文名，优先级高于自动策略。
+- 新增 `generator-ts-api.naming.skipDuplicateControllerClassNameSuffix`，当命名来源已包含配置后缀时不再重复追加，避免 `UserControllerController`。
+- Controller 选择、过滤和分组仍使用原始 `tags.name` / `operation.tags[0]`，只在最终写文件和 Class 名时解析命名来源，确保 name/description 混用时仍能正确对应。
+
 ## [0.3.2] - 2026年7月8日
 
 #### 面板刷新与工具栏优化

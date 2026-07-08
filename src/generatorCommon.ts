@@ -4,6 +4,9 @@ export interface NamingConfig {
   controllersDirName: string
   controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   controllerClassNameSuffix: string
+  controllerNameStrategy: "tagName" | "tagDescription" | "auto"
+  controllerNameMap: Record<string, string>
+  skipDuplicateControllerClassNameSuffix: boolean
   methodNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   /**
    * 类型名命名风格。"follow" 表示跟随 methodNameCasing（向后兼容旧行为）；
@@ -17,6 +20,9 @@ export const DEFAULT_NAMING: NamingConfig = {
   controllersDirName: "controllers",
   controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
+  controllerNameStrategy: "tagName",
+  controllerNameMap: {},
+  skipDuplicateControllerClassNameSuffix: true,
   methodNameCasing: "default",
   typeNameCasing: "follow",
 }
@@ -148,17 +154,73 @@ export function applyFileCasing(s: string, casing: NamingConfig["controllerFileN
   return toPascalCase(s)
 }
 
+function hasChinese(value: string): boolean {
+  return /[\u4e00-\u9fa5]/.test(value)
+}
+
+function looksLikeEnglishIdentifier(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_\-\s.]*$/.test(value.trim())
+}
+
+function findTagByControllerKey(controllerKey: string, tags: any[] = []): any | undefined {
+  return tags.find((tag: any) =>
+    typeof tag?.name === "string" &&
+    (tag.name === controllerKey || sanitizeName(tag.name) === controllerKey)
+  )
+}
+
+export function resolveControllerNamingKey(
+  controllerKey: string,
+  tags: any[] = [],
+  naming: NamingConfig = DEFAULT_NAMING
+): string {
+  const tag = findTagByControllerKey(controllerKey, tags)
+  const rawName = typeof tag?.name === "string" && tag.name.trim() ? tag.name.trim() : controllerKey
+  const description = typeof tag?.description === "string" ? tag.description.trim() : ""
+  const mapped = naming.controllerNameMap?.[rawName] || naming.controllerNameMap?.[controllerKey]
+  if (typeof mapped === "string" && mapped.trim()) return mapped.trim()
+
+  if (naming.controllerNameStrategy === "tagDescription") {
+    return description || rawName
+  }
+
+  if (naming.controllerNameStrategy === "auto") {
+    if (hasChinese(rawName) && description && !hasChinese(description) && looksLikeEnglishIdentifier(description)) {
+      return description
+    }
+    return rawName
+  }
+
+  return rawName
+}
+
+function appendSuffixOnce(base: string, suffix: string, skipDuplicate: boolean): string {
+  if (!suffix) return base
+  if (skipDuplicate && base.toLowerCase().endsWith(suffix.toLowerCase())) return base
+  return base + suffix
+}
+
 export function buildControllerNames(controllerKey: string, naming: NamingConfig): { className: string; fileName: string } {
   const classBase = naming.controllerFileNameCasing === "default"
     ? sanitizeName(controllerKey)
     : toPascalCase(controllerKey)
+  const classNameRaw = appendSuffixOnce(
+    classBase,
+    naming.controllerClassNameSuffix,
+    naming.skipDuplicateControllerClassNameSuffix
+  )
   const className = naming.controllerFileNameCasing === "default"
-    ? sanitizeName(classBase + naming.controllerClassNameSuffix)
-    : classBase + naming.controllerClassNameSuffix
+    ? sanitizeName(classNameRaw)
+    : classNameRaw
   const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
-  const fileName = fileBase + (naming.controllerClassNameSuffix
+  const fileSuffix = naming.controllerClassNameSuffix
     ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
-    : "")
+    : ""
+  const fileName = appendSuffixOnce(
+    fileBase,
+    fileSuffix,
+    naming.skipDuplicateControllerClassNameSuffix
+  )
   return { className, fileName }
 }
 
@@ -810,6 +872,8 @@ export interface WriteControllersParams {
   httpClientConfig: HttpClientConfig
   /** controllerKey -> 该控制器的方法代码片段数组 */
   controllers: Map<string, string[]>
+  /** 原始 apiDocs.tags，用于在不改变分组 key 的前提下解析命名来源 */
+  tags?: any[]
   /** 根据 controllerKey 返回控制器描述文本 */
   describe: (controllerKey: string) => string
   /** 全部可作为类型导入的候选类型名 */
@@ -845,6 +909,7 @@ export function writeControllers(
     naming,
     httpClientConfig,
     controllers,
+    tags,
     describe,
     typeImportCandidates,
     typeMode,
@@ -883,7 +948,8 @@ export function writeControllers(
   let fileCount = 0
 
   for (const [controllerKey, methods] of controllers) {
-    const { className, fileName } = buildControllerNames(controllerKey, naming)
+    const namingKey = resolveControllerNamingKey(controllerKey, tags || [], naming)
+    const { className, fileName } = buildControllerNames(namingKey, naming)
     const description = describe(controllerKey)
     const methodsCode = methods.join("\n\n")
     const importLine = buildImportSnippet(httpClientConfig)

@@ -3,7 +3,7 @@
   "displayName": "Get Api Docs",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -284,6 +284,34 @@
             "type": "string",
             "default": "",
             "description": "【仅 byTag / byController 模式生效】控制器类名与文件名的后缀。例如填 Controller，Tag「用户」会生成类 UserController；留空则为 User"
+          },
+          "generator-ts-api.naming.controllerNameStrategy": {
+            "type": "string",
+            "enum": [
+              "tagName",
+              "tagDescription",
+              "auto"
+            ],
+            "default": "tagName",
+            "enumDescriptions": [
+              "tagName：始终使用 tags.name 生成控制器文件名和类名，保持旧版行为",
+              "tagDescription：优先使用 tags.description 生成控制器文件名和类名，description 为空时回退 tags.name",
+              "auto：tags.name 含中文且 tags.description 是英文标识风格时使用 description，否则使用 name"
+            ],
+            "description": "【仅拆分输出模式生效】控制器文件名和类名的命名来源。匹配与过滤仍始终使用原始 tags.name，避免 name/description 混用时对应关系断开"
+          },
+          "generator-ts-api.naming.controllerNameMap": {
+            "type": "object",
+            "default": {},
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "【仅拆分输出模式生效】控制器命名映射，优先级最高。key 可填写原始 tags.name 或清洗后的 controllerKey，value 为生成文件名/Class 名使用的英文名，例如 { \"用户管理\": \"UserController\" }"
+          },
+          "generator-ts-api.naming.skipDuplicateControllerClassNameSuffix": {
+            "type": "boolean",
+            "default": true,
+            "description": "【仅拆分输出模式生效】当控制器命名来源已经包含 controllerClassNameSuffix 时，不再重复追加后缀。例如 description 为 UserController 且 suffix 为 Controller 时仍生成 UserController，而不是 UserControllerController"
           },
           "generator-ts-api.naming.methodNameCasing": {
             "type": "string",

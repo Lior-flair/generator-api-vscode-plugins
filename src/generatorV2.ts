@@ -182,6 +182,7 @@ export class ApiGenerator {
       naming,
       httpClientConfig: this.httpClientConfig,
       controllers,
+      tags: apiDocs.tags || [],
       describe,
       typeImportCandidates,
       typeMode,

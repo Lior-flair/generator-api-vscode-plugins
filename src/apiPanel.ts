@@ -14,7 +14,69 @@ export interface ApiConfigRow {
   value: string
 }
 
-type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "configRoot" | "section" | "info" | "configRow"
+export interface ApiControllerNameMapRow {
+  name: string
+  value: string
+  description?: string
+}
+
+type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "configRoot" | "section" | "info" | "configSection" | "configRow" | "configMapRoot" | "configMapItem"
+
+interface ApiConfigGroup {
+  id: string
+  label: string
+  icon: string
+  keys: string[]
+}
+
+const CONFIG_GROUPS: ApiConfigGroup[] = [
+  {
+    id: "source",
+    label: "文档来源",
+    icon: "link",
+    keys: ["apiDocsUrl", "apiDocsPath"],
+  },
+  {
+    id: "output",
+    label: "生成输出",
+    icon: "output",
+    keys: ["framework", "outputType", "outputSplit", "cleanOutputDir"],
+  },
+  {
+    id: "http",
+    label: "HTTP 客户端",
+    icon: "plug",
+    keys: ["httpClient", "requestImportPath", "directReplacementRequestImportPath", "generateRequestScaffold", "compatibilityVersion"],
+  },
+  {
+    id: "naming",
+    label: "命名规范",
+    icon: "symbol-key",
+    keys: [
+      "naming.typesDirName",
+      "naming.controllersDirName",
+      "naming.controllerFileNameCasing",
+      "naming.controllerClassNameSuffix",
+      "naming.controllerNameStrategy",
+      "naming.controllerNameMap",
+      "naming.skipDuplicateControllerClassNameSuffix",
+      "naming.methodNameCasing",
+      "naming.typeNameCasing",
+    ],
+  },
+  {
+    id: "types",
+    label: "类型与拆分",
+    icon: "symbol-interface",
+    keys: ["typeMapping.dateTimeTarget", "typeMapping.formatMap", "byController.localTypes", "byControllerSingleFile.extractSharedTypes"],
+  },
+  {
+    id: "panel",
+    label: "面板监听",
+    icon: "eye",
+    keys: ["watch.intervalSeconds"],
+  },
+]
 
 export class ApiPanelNode extends vscode.TreeItem {
   constructor(
@@ -23,11 +85,15 @@ export class ApiPanelNode extends vscode.TreeItem {
     public readonly profile?: ApiProfile,
     command?: vscode.Command,
     public readonly historyItem?: ApiHistoryItem,
-    public readonly configRow?: ApiConfigRow
+    public readonly configRow?: ApiConfigRow,
+    public readonly controllerNameMapRow?: ApiControllerNameMapRow,
+    public readonly configGroupId?: string
   ) {
     const collapsibleState =
-      kind === "profile" || kind === "historyRoot" || kind === "configRoot" || kind === "section"
+      kind === "profile" || kind === "section" || kind === "configMapRoot"
         ? vscode.TreeItemCollapsibleState.Expanded
+        : kind === "historyRoot" || kind === "configRoot" || kind === "configSection"
+        ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None
     super(label, collapsibleState)
     this.command = command
@@ -41,7 +107,8 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
   constructor(
     private readonly profileManager: ApiProfileManager,
     private readonly getUrlHistory: () => ApiHistoryItem[],
-    private readonly getConfigRows: () => ApiConfigRow[]
+    private readonly getConfigRows: () => ApiConfigRow[],
+    private readonly getControllerNameMapRows: () => vscode.ProviderResult<ApiControllerNameMapRow[]>
   ) {}
 
   refresh(): void {
@@ -100,13 +167,59 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
     }
 
     if (element.kind === "configRoot") {
-      return this.getConfigRows().map((row) => {
+      return CONFIG_GROUPS.map((group) => {
+        const node = new ApiPanelNode("configSection", group.label, undefined, undefined, undefined, undefined, undefined, group.id)
+        node.description = `${group.keys.length} 项`
+        node.tooltip = group.keys.join("\n")
+        node.contextValue = "apiConfigSection"
+        node.iconPath = new vscode.ThemeIcon(group.icon)
+        return node
+      })
+    }
+
+    if (element.kind === "configSection" && element.configGroupId) {
+      const group = CONFIG_GROUPS.find((item) => item.id === element.configGroupId)
+      if (!group) return []
+      const configRows = this.getConfigRows()
+        .filter((row) => group.keys.includes(row.key) && row.key !== "naming.controllerNameMap")
+        .map((row) => {
         const node = new ApiPanelNode("configRow", row.label, undefined, undefined, undefined, row)
         node.description = row.value
         node.tooltip = `${row.key}\n${row.value}`
         node.contextValue = "apiConfigRow"
         node.iconPath = new vscode.ThemeIcon("settings")
         return node
+      })
+      if (element.configGroupId !== "naming") return configRows
+      const mapRoot = new ApiPanelNode("configMapRoot", "Controller 命名映射")
+      mapRoot.description = "按默认 API 文档 tags.name 展示"
+      mapRoot.tooltip = "generator-ts-api.naming.controllerNameMap"
+      mapRoot.contextValue = "apiControllerNameMapRoot"
+      mapRoot.iconPath = new vscode.ThemeIcon("symbol-class")
+      return configRows.concat(mapRoot)
+    }
+
+    if (element.kind === "configMapRoot") {
+      const rows = this.getControllerNameMapRows()
+      return Promise.resolve(rows).then((items) => {
+        if (!items || items.length === 0) {
+          const empty = new ApiPanelNode("empty", "暂无 Controller")
+          empty.description = "默认 API 文档无 tags"
+          empty.iconPath = new vscode.ThemeIcon("info")
+          return [empty]
+        }
+        return items.map((row) => {
+          const node = new ApiPanelNode("configMapItem", row.name, undefined, undefined, undefined, undefined, row)
+          node.description = row.value || ""
+          node.tooltip = [
+            `key: ${row.name}`,
+            `value: ${row.value || ""}`,
+            row.description ? `description: ${row.description}` : "",
+          ].filter(Boolean).join("\n")
+          node.contextValue = "apiControllerNameMapItem"
+          node.iconPath = row.value ? new vscode.ThemeIcon("check") : new vscode.ThemeIcon("circle-outline")
+          return node
+        })
       })
     }
 

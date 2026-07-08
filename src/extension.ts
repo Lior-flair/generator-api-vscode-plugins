@@ -6,7 +6,7 @@ import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
 import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
-import { ApiConfigRow, ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
+import { ApiConfigRow, ApiControllerNameMapRow, ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
 import { filterApiDocsByControllers, getApiDocHash, getControllerNames } from "./docUtils"
 import { ApiProfile, ApiProfileManager, createProfileId } from "./profileManager"
 import {
@@ -44,6 +44,9 @@ function buildNamingConfig(config: vscode.WorkspaceConfiguration): NamingConfig 
     controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
     controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
     controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+    controllerNameStrategy: ((config.get("naming.controllerNameStrategy") as string) || "tagName") as "tagName" | "tagDescription" | "auto",
+    controllerNameMap: (config.get("naming.controllerNameMap") as Record<string, string>) || {},
+    skipDuplicateControllerClassNameSuffix: (config.get("naming.skipDuplicateControllerClassNameSuffix") as boolean) !== false,
     methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
     typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
   }
@@ -57,6 +60,7 @@ interface ProfileConfigEntry {
 
 const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
   { key: "apiDocsUrl", label: "API URL", defaultValue: "" },
+  { key: "apiDocsPath", label: "API 本地路径", defaultValue: "" },
   { key: "framework", label: "框架", defaultValue: "react" },
   { key: "outputType", label: "输出类型", defaultValue: "ts" },
   { key: "outputSplit", label: "输出模式", defaultValue: "single" },
@@ -74,8 +78,12 @@ const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
   { key: "naming.controllersDirName", label: "Controller 目录名", defaultValue: "controllers" },
   { key: "naming.controllerFileNameCasing", label: "Controller 文件命名", defaultValue: "default" },
   { key: "naming.controllerClassNameSuffix", label: "Controller 类后缀", defaultValue: "" },
+  { key: "naming.controllerNameStrategy", label: "Controller 命名来源", defaultValue: "tagName" },
+  { key: "naming.controllerNameMap", label: "Controller 命名映射", defaultValue: {} },
+  { key: "naming.skipDuplicateControllerClassNameSuffix", label: "跳过重复类后缀", defaultValue: true },
   { key: "naming.methodNameCasing", label: "方法命名", defaultValue: "default" },
   { key: "naming.typeNameCasing", label: "类型命名", defaultValue: "follow" },
+  { key: "watch.intervalSeconds", label: "监听间隔秒数", defaultValue: 120 },
 ]
 
 function stringifyConfigValue(value: unknown): string {
@@ -171,7 +179,46 @@ export function activate(context: vscode.ExtensionContext) {
   const apiGeneratorV2 = new ApiGeneratorV2()
   const apiParser = new ApiParser()
   const profileManager = new ApiProfileManager(context)
-  const apiPanelProvider = new ApiPanelProvider(profileManager, () => urlHistory, buildConfigRows)
+
+  const loadProfileDocs = async (profile: ApiProfile): Promise<any> => {
+    if (profile.sourceType === "url" && profile.url) {
+      return apiParser.parseFromUrl(profile.url)
+    }
+    if (profile.sourceType === "file" && profile.filePath) {
+      return apiParser.parseFromFile(profile.filePath)
+    }
+    throw new Error("API 配置缺少文档来源")
+  }
+
+  const buildControllerNameMapRows = async (): Promise<ApiControllerNameMapRow[]> => {
+    const profile = profileManager.getDefaultProfile()
+    if (!profile) return []
+    try {
+      const apiDocs = await loadProfileDocs(profile)
+      const config = vscode.workspace.getConfiguration("generator-ts-api")
+      const nameMap = (config.get("naming.controllerNameMap") as Record<string, string>) || {}
+      const rows: ApiControllerNameMapRow[] = []
+      const seen = new Set<string>()
+      if (Array.isArray(apiDocs?.tags)) {
+        for (const tag of apiDocs.tags) {
+          const name = typeof tag?.name === "string" ? tag.name.trim() : ""
+          if (!name || seen.has(name)) continue
+          seen.add(name)
+          rows.push({
+            name,
+            value: typeof nameMap[name] === "string" ? nameMap[name] : "",
+            description: typeof tag?.description === "string" ? tag.description : undefined,
+          })
+        }
+      }
+      return rows.sort((a, b) => a.name.localeCompare(b.name))
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "未知错误"
+      return [{ name: "无法读取默认 API 文档", value: message }]
+    }
+  }
+
+  const apiPanelProvider = new ApiPanelProvider(profileManager, () => urlHistory, buildConfigRows, buildControllerNameMapRows)
   const apiPanelTree = vscode.window.createTreeView("generator-ts-api.profiles", {
     treeDataProvider: apiPanelProvider,
     showCollapseAll: true,
@@ -308,16 +355,6 @@ export function activate(context: vscode.ExtensionContext) {
       filters: outputType === "js" ? { JavaScript: ["js"] } : { TypeScript: ["ts"] },
     })
     return outputPath?.fsPath
-  }
-
-  const loadProfileDocs = async (profile: ApiProfile): Promise<any> => {
-    if (profile.sourceType === "url" && profile.url) {
-      return apiParser.parseFromUrl(profile.url)
-    }
-    if (profile.sourceType === "file" && profile.filePath) {
-      return apiParser.parseFromFile(profile.filePath)
-    }
-    throw new Error("API 配置缺少文档来源")
   }
 
   const generateProfile = async (profile: ApiProfile, forcePickOutput = false): Promise<void> => {
@@ -614,14 +651,7 @@ export function activate(context: vscode.ExtensionContext) {
       const framework = config.get("framework") as string
       const outputType = config.get("outputType") as string
       const outputSplit = (config.get("outputSplit") as string) || "single"
-      const namingConfig = {
-        typesDirName: (config.get("naming.typesDirName") as string) || "types",
-        controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-        controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-        controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
-        methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-        typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
-      }
+      const namingConfig = buildNamingConfig(config)
 
       // 右侧 loading
       const loadingRight = vscode.window.createStatusBarItem(
@@ -735,14 +765,7 @@ export function activate(context: vscode.ExtensionContext) {
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
-          const namingConfig = {
-            typesDirName: (config.get("naming.typesDirName") as string) || "types",
-            controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-            controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
-            methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-            typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
-          }
+          const namingConfig = buildNamingConfig(config)
 
           let outputFsPath: string | undefined
           if (outputSplit !== "single") {
@@ -842,14 +865,7 @@ export function activate(context: vscode.ExtensionContext) {
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
-          const namingConfig = {
-            typesDirName: (config.get("naming.typesDirName") as string) || "types",
-            controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
-            controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-            controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
-            methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
-            typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
-          }
+          const namingConfig = buildNamingConfig(config)
 
           let outputFsPath: string | undefined
           if (outputSplit !== "single") {
