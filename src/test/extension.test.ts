@@ -4,6 +4,7 @@ import * as assert from 'assert';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import { buildControllerNames, buildImportSnippet, buildUniqueMethodName, DEFAULT_NAMING, DEFAULT_HTTP_CLIENT_CONFIG, normalizeTypeExpression, resolveControllerNamingKey } from '../generatorCommon';
+import { ApiGenerator as ApiGeneratorV2 } from '../generatorV2';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -74,5 +75,42 @@ suite('Extension Test Suite', () => {
 		});
 		assert.strictEqual(kebabNames.className, 'UserCenterController');
 		assert.strictEqual(kebabNames.fileName, 'user-center-controller');
+	});
+
+	test('V2 params interface should only use controller prefix when method names collide', () => {
+		const generator = new ApiGeneratorV2() as any;
+		generator.naming = {
+			...DEFAULT_NAMING,
+			controllerNameStrategy: 'auto',
+			methodNameCasing: 'camelCase',
+			controllerClassNameSuffix: 'Controller',
+			skipDuplicateControllerClassNameSuffix: true,
+		};
+		const makeParams = () => Array.from({ length: 6 }, (_, index) => ({
+			name: `field${index}`,
+			in: 'query',
+			type: 'string',
+		}));
+		const apiDocs = {
+			swagger: '2.0',
+			info: { title: 'test', version: '1.0.0' },
+			tags: [
+				{ name: '用户管理', description: 'UserController' },
+				{ name: '订单管理', description: 'OrderController' },
+				{ name: '库存管理', description: 'StockController' },
+			],
+			paths: {
+				'/user/list': { get: { tags: ['用户管理'], parameters: makeParams(), responses: {} } },
+				'/order/list': { get: { tags: ['订单管理'], parameters: makeParams(), responses: {} } },
+				'/stock/page': { get: { tags: ['库存管理'], parameters: makeParams(), responses: {} } },
+			},
+			definitions: {},
+		};
+		const result = generator.generateController(apiDocs);
+		const joined = result.paramTypes.join('\n');
+		assert.match(joined, /export interface UserControllerListParams/);
+		assert.match(joined, /export interface OrderControllerListParams/);
+		assert.match(joined, /export interface PageParams/);
+		assert.doesNotMatch(joined, /StockControllerPageParams/);
 	});
 });

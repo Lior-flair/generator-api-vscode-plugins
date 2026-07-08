@@ -3,6 +3,7 @@ import * as path from "path"
 import { OpenAPIV2 } from "openapi-types"
 import {
   buildImportSnippet,
+  buildControllerNames,
   buildMethodBody,
   buildUniqueMethodName,
   cleanSplitOutputDir,
@@ -13,6 +14,7 @@ import {
   normalizeIdentifierName,
   normalizeTypeExpression,
   resolveMappedScalarType,
+  resolveControllerNamingKey,
   resolveTypeNameCasing,
   sanitizeName,
   type SplitOutputResult,
@@ -244,6 +246,10 @@ export class ApiGenerator {
     return normalizeTypeExpression(typeExpr, resolveTypeNameCasing(this.naming))
   }
 
+  private normalizeParamsTypeNamePart(name: string): string {
+    return toPascalCase(sanitizeName(name))
+  }
+
   private normalizeFormat(format: unknown): string | undefined {
     if (typeof format === "string") return format
     if (Array.isArray(format) && typeof format[0] === "string") return format[0]
@@ -396,6 +402,36 @@ export class ApiGenerator {
   private generateController(apiDocs: OpenAPIV2.Document) {
     const controllers: Map<string, string[]> = new Map()
     const paramTypes: string[] = []
+    const operationMeta = new Map<string, {
+      controllerName: string
+      controllerClassName: string
+      methodName: string
+    }>()
+    const methodNameCounts = new Map<string, number>()
+
+    ;(globalThis as any)._controllerMethodNames = {}
+
+    for (const [p, pathItem] of Object.entries(apiDocs.paths || {})) {
+      const pathItemObj = pathItem as any
+      if (!pathItemObj) continue
+      for (const [method, operation] of Object.entries(pathItemObj)) {
+        const op = operation as any
+        if (!op || typeof op !== "object") continue
+        const tag = op.tags?.[0] || "Default"
+        const controllerName = this.sanitizeName(tag)
+        const controllerNamingKey = resolveControllerNamingKey(controllerName, apiDocs.tags || [], this.naming)
+        const controllerClassName = buildControllerNames(controllerNamingKey, this.naming).className
+        const methodName = buildUniqueMethodName(
+          p as string,
+          controllerName,
+          method,
+          op.operationId,
+          this.naming
+        )
+        operationMeta.set(`${p}::${method}`, { controllerName, controllerClassName, methodName })
+        methodNameCounts.set(methodName, (methodNameCounts.get(methodName) || 0) + 1)
+      }
+    }
 
     for (const [p, pathItem] of Object.entries(apiDocs.paths || {})) {
       const pathItemObj = pathItem as any
@@ -406,21 +442,19 @@ export class ApiGenerator {
 
         // determine tag and controller name
         const tag = op.tags?.[0] || "Default"
-        const controllerName = this.sanitizeName(tag)
+        const meta = operationMeta.get(`${p}::${method}`)
+        const controllerName = meta?.controllerName || this.sanitizeName(tag)
         if (!controllers.has(controllerName)) controllers.set(controllerName, [])
 
-        const methodName = buildUniqueMethodName(
-          p as string,
-          controllerName,
-          method,
-          op.operationId,
-          this.naming
-        )
+        const methodName = meta?.methodName || buildUniqueMethodName(p as string, controllerName, method, op.operationId, this.naming)
 
         const parameters = (op.parameters || []) as any[]
 
         // params type generation（v2: path/query/body/formData 进入 params；header 写入注释）
-        const paramsName = `${controllerName}${methodName}Params`
+        const paramsMethodName = this.normalizeParamsTypeNamePart(methodName)
+        const paramsName = methodNameCounts.get(methodName) && methodNameCounts.get(methodName)! > 1
+          ? `${meta?.controllerClassName || controllerName}${paramsMethodName}Params`
+          : `${paramsMethodName}Params`
         const paramsProps: string[] = []
         const seenFields = new Set<string>()
         const queryParamNames: string[] = []

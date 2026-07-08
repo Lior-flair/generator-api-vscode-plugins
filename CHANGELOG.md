@@ -1,10 +1,11 @@
 # Change Log
 
-## [0.3.4] - 2026年7月8日
+## [0.3.5] - 2026年7月8日
 
 #### Controller 命名修复
 
 - 修复 `auto` 或映射命名来源中包含空格、点号等特殊符号时，Controller 文件名没有统一清洗的问题。
+- 修复 V2 参数类型前缀仍使用原始 `tags[].name` 的问题；现在会跟随 `controllerNameStrategy`，仅在方法名冲突时追加 Controller 前缀，并保证类型名中的 Method 片段首字母大写。
 
 ## [0.3.3] - 2026年7月8日
 
