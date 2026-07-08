@@ -62,4 +62,17 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(names.className, 'UserController');
 		assert.strictEqual(names.fileName, 'UserController');
 	});
+
+	test('buildControllerNames should sanitize controller names before file casing', () => {
+		const defaultNames = buildControllerNames('User Center.Controller', DEFAULT_NAMING);
+		assert.strictEqual(defaultNames.className, 'User_Center_Controller');
+		assert.strictEqual(defaultNames.fileName, 'User_Center_Controller');
+
+		const kebabNames = buildControllerNames('User Center.Controller', {
+			...DEFAULT_NAMING,
+			controllerFileNameCasing: 'kebab-case',
+		});
+		assert.strictEqual(kebabNames.className, 'UserCenterController');
+		assert.strictEqual(kebabNames.fileName, 'user-center-controller');
+	});
 });

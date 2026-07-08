@@ -154,6 +154,10 @@ export function applyFileCasing(s: string, casing: NamingConfig["controllerFileN
   return toPascalCase(s)
 }
 
+function normalizeControllerNamePart(value: string): string {
+  return sanitizeName(String(value).trim().replace(/\s+/g, "_")) || "_"
+}
+
 function hasChinese(value: string): boolean {
   return /[\u4e00-\u9fa5]/.test(value)
 }
@@ -201,20 +205,24 @@ function appendSuffixOnce(base: string, suffix: string, skipDuplicate: boolean):
 }
 
 export function buildControllerNames(controllerKey: string, naming: NamingConfig): { className: string; fileName: string } {
+  const normalizedKey = normalizeControllerNamePart(controllerKey)
+  const normalizedSuffix = naming.controllerClassNameSuffix
+    ? normalizeControllerNamePart(naming.controllerClassNameSuffix)
+    : ""
   const classBase = naming.controllerFileNameCasing === "default"
-    ? sanitizeName(controllerKey)
-    : toPascalCase(controllerKey)
+    ? normalizedKey
+    : toPascalCase(normalizedKey)
   const classNameRaw = appendSuffixOnce(
     classBase,
-    naming.controllerClassNameSuffix,
+    normalizedSuffix,
     naming.skipDuplicateControllerClassNameSuffix
   )
   const className = naming.controllerFileNameCasing === "default"
     ? sanitizeName(classNameRaw)
     : classNameRaw
-  const fileBase = applyFileCasing(controllerKey, naming.controllerFileNameCasing)
-  const fileSuffix = naming.controllerClassNameSuffix
-    ? applyFileCasing(naming.controllerClassNameSuffix, naming.controllerFileNameCasing)
+  const fileBase = applyFileCasing(normalizedKey, naming.controllerFileNameCasing)
+  const fileSuffix = normalizedSuffix
+    ? applyFileCasing(normalizedSuffix, naming.controllerFileNameCasing)
     : ""
   const fileName = appendSuffixOnce(
     fileBase,
