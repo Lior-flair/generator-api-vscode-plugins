@@ -3,7 +3,7 @@
   "displayName": "Get Api Docs",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,7 @@
     "onCommand:generator-ts-api.generateMock",
     "onCommand:generator-ts-api.generateRequestTemplate",
     "onCommand:generator-ts-api.profile.addUrl",
+    "onCommand:generator-ts-api.profile.refreshPanel",
     "onCommand:generator-ts-api.profile.generateDefault",
     "onCommand:generator-ts-api.profile.generate",
     "onCommand:generator-ts-api.profile.check",
@@ -66,9 +67,14 @@
         "icon": "$(add)"
       },
       {
+        "command": "generator-ts-api.profile.refreshPanel",
+        "title": "Generator TS API: 刷新面板信息",
+        "icon": "$(refresh)"
+      },
+      {
         "command": "generator-ts-api.profile.generateDefault",
         "title": "Generator TS API: 使用默认配置更新 API",
-        "icon": "$(sync)"
+        "icon": "$(rocket)"
       },
       {
         "command": "generator-ts-api.profile.generate",
@@ -134,14 +140,19 @@
     "menus": {
       "view/title": [
         {
+          "command": "generator-ts-api.profile.refreshPanel",
+          "when": "view == generator-ts-api.profiles",
+          "group": "navigation@1"
+        },
+        {
           "command": "generator-ts-api.profile.addUrl",
           "when": "view == generator-ts-api.profiles",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
           "command": "generator-ts-api.profile.generateDefault",
           "when": "view == generator-ts-api.profiles",
-          "group": "navigation"
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [

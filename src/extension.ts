@@ -6,7 +6,7 @@ import { ApiGenerator as ApiGeneratorV3 } from "./generatorV3"
 import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
 import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
-import { ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
+import { ApiConfigRow, ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
 import { filterApiDocsByControllers, getApiDocHash, getControllerNames } from "./docUtils"
 import { ApiProfile, ApiProfileManager, createProfileId } from "./profileManager"
 import {
@@ -47,6 +47,55 @@ function buildNamingConfig(config: vscode.WorkspaceConfiguration): NamingConfig 
     methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
     typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
   }
+}
+
+interface ProfileConfigEntry {
+  key: string
+  label: string
+  defaultValue: unknown
+}
+
+const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
+  { key: "apiDocsUrl", label: "API URL", defaultValue: "" },
+  { key: "framework", label: "框架", defaultValue: "react" },
+  { key: "outputType", label: "输出类型", defaultValue: "ts" },
+  { key: "outputSplit", label: "输出模式", defaultValue: "single" },
+  { key: "cleanOutputDir", label: "生成前清理", defaultValue: false },
+  { key: "byController.localTypes", label: "Controller 本地类型", defaultValue: false },
+  { key: "byControllerSingleFile.extractSharedTypes", label: "抽离共用类型", defaultValue: false },
+  { key: "httpClient", label: "HTTP 客户端", defaultValue: "axios-wrapper" },
+  { key: "requestImportPath", label: "Request Import", defaultValue: "" },
+  { key: "directReplacementRequestImportPath", label: "Import 直接替换", defaultValue: false },
+  { key: "generateRequestScaffold", label: "生成 Request 样板", defaultValue: false },
+  { key: "compatibilityVersion", label: "兼容版本", defaultValue: "latest" },
+  { key: "typeMapping.dateTimeTarget", label: "date-time 类型", defaultValue: "string" },
+  { key: "typeMapping.formatMap", label: "Format 映射", defaultValue: {} },
+  { key: "naming.typesDirName", label: "类型目录名", defaultValue: "types" },
+  { key: "naming.controllersDirName", label: "Controller 目录名", defaultValue: "controllers" },
+  { key: "naming.controllerFileNameCasing", label: "Controller 文件命名", defaultValue: "default" },
+  { key: "naming.controllerClassNameSuffix", label: "Controller 类后缀", defaultValue: "" },
+  { key: "naming.methodNameCasing", label: "方法命名", defaultValue: "default" },
+  { key: "naming.typeNameCasing", label: "类型命名", defaultValue: "follow" },
+]
+
+function stringifyConfigValue(value: unknown): string {
+  if (value === undefined) return "未设置"
+  if (value === "") return "\"\""
+  if (typeof value === "string") return value
+  return JSON.stringify(value)
+}
+
+function readConfigValue(config: vscode.WorkspaceConfiguration, key: string, defaultValue: unknown): unknown {
+  return config.get(key, defaultValue)
+}
+
+function buildConfigRows(): ApiConfigRow[] {
+  const config = vscode.workspace.getConfiguration("generator-ts-api")
+  return PROFILE_CONFIG_ENTRIES.map((entry) => ({
+    key: entry.key,
+    label: entry.label,
+    value: stringifyConfigValue(readConfigValue(config, entry.key, entry.defaultValue)),
+  }))
 }
 
 interface HistoryItem {
@@ -122,20 +171,23 @@ export function activate(context: vscode.ExtensionContext) {
   const apiGeneratorV2 = new ApiGeneratorV2()
   const apiParser = new ApiParser()
   const profileManager = new ApiProfileManager(context)
-  const apiPanelProvider = new ApiPanelProvider(profileManager, () => urlHistory)
+  const apiPanelProvider = new ApiPanelProvider(profileManager, () => urlHistory, buildConfigRows)
   const apiPanelTree = vscode.window.createTreeView("generator-ts-api.profiles", {
     treeDataProvider: apiPanelProvider,
     showCollapseAll: true,
   })
   context.subscriptions.push(apiPanelTree)
 
-  // 从扩展存储中加载历史记录，兼容旧版 string[] 格式
-  const rawHistory = context.globalState.get<any[]>("urlHistory")
-  if (rawHistory) {
-    urlHistory = rawHistory.map((item: any) =>
-      typeof item === "string" ? { url: item } : (item as HistoryItem)
-    )
+  const loadUrlHistory = () => {
+    const rawHistory = context.globalState.get<any[]>("urlHistory")
+    if (rawHistory) {
+      urlHistory = rawHistory.map((item: any) =>
+        typeof item === "string" ? { url: item } : (item as HistoryItem)
+      )
+    }
   }
+  // 从扩展存储中加载历史记录，兼容旧版 string[] 格式
+  loadUrlHistory()
 
   // 保存 URL 到历史记录（保留已有名称，更新版本）
   const saveUrlToHistory = (url: string, swaggerVersion?: string) => {
@@ -274,10 +326,11 @@ export function activate(context: vscode.ExtensionContext) {
     loading.show()
     try {
       const config = vscode.workspace.getConfiguration("generator-ts-api")
-      const framework = config.get("framework") as string
-      const outputType = config.get("outputType") as string
-      const outputSplit = profile.outputSplit || ((config.get("outputSplit") as string) || "single")
-      let outputFsPath = forcePickOutput ? undefined : profile.outputPath
+      const framework = ((config.get("framework") as string) || "react")
+      const outputType = ((config.get("outputType") as string) || "ts")
+      const outputSplit = ((config.get("outputSplit") as string) || "single")
+      const outputModeChanged = Boolean(profile.outputSplit && profile.outputSplit !== outputSplit)
+      let outputFsPath = forcePickOutput || outputModeChanged ? undefined : profile.outputPath
       if (!outputFsPath) {
         outputFsPath = await pickOutputPath(outputSplit, outputType)
       }
@@ -289,9 +342,9 @@ export function activate(context: vscode.ExtensionContext) {
       const generator = getGenerator(filteredDocs)
       loading.text = "$(sync~spin) 生成代码中..."
       const httpClientConfig = buildHttpClientConfig(config)
-      const cleanOutputDir = (config.get("cleanOutputDir") as boolean) || false
-      const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
-      const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
+      const cleanOutputDir = ((config.get("cleanOutputDir") as boolean) || false)
+      const byControllerLocalTypes = ((config.get("byController.localTypes") as boolean) || false)
+      const extractSharedTypes = ((config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false)
       const genResult = await generator.generate(
         filteredDocs,
         framework,
@@ -373,13 +426,11 @@ export function activate(context: vscode.ExtensionContext) {
       ignoreFocusOut: true,
     })
     if (name === undefined) return
-    const config = vscode.workspace.getConfiguration("generator-ts-api")
     const profile: ApiProfile = {
       id: createProfileId(),
       name: name.trim() || url,
       sourceType: "url",
       url,
-      outputSplit: ((config.get("outputSplit") as string) || "single"),
       autoWatch: false,
       status: "unknown",
     }
@@ -445,11 +496,14 @@ export function activate(context: vscode.ExtensionContext) {
 
   const pickProfileOutput = async (profile: ApiProfile): Promise<void> => {
     const config = vscode.workspace.getConfiguration("generator-ts-api")
-    const outputType = config.get("outputType") as string
-    const outputSplit = profile.outputSplit || ((config.get("outputSplit") as string) || "single")
+    const outputType = ((config.get("outputType") as string) || "ts")
+    const outputSplit = ((config.get("outputSplit") as string) || "single")
     const outputPath = await pickOutputPath(outputSplit, outputType)
     if (!outputPath) return
-    await profileManager.updateProfile(profile.id, { outputPath, outputSplit })
+    await profileManager.updateProfile(profile.id, {
+      outputPath,
+      outputSplit,
+    })
     apiPanelProvider.refresh()
   }
 
@@ -505,6 +559,46 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }, intervalSeconds * 1000)
   }
+
+  const runWithConcurrency = async <T>(
+    items: T[],
+    limit: number,
+    runner: (item: T) => Promise<unknown>
+  ): Promise<void> => {
+    let nextIndex = 0
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const item = items[nextIndex++]
+        await runner(item)
+      }
+    })
+    await Promise.allSettled(workers)
+  }
+
+  const refreshPanelInfo = async (): Promise<void> => {
+    loadUrlHistory()
+    refreshWatchTimer()
+    apiPanelProvider.refresh()
+    const profiles = profileManager.getProfiles()
+    if (profiles.length === 0) {
+      vscode.window.showInformationMessage("面板信息已刷新")
+      return
+    }
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Window,
+        title: "刷新 API 面板信息",
+      },
+      async () => {
+        await runWithConcurrency(profiles, 3, async (profile) => {
+          await checkProfile(profile, true)
+        })
+      }
+    )
+    apiPanelProvider.refresh()
+    vscode.window.showInformationMessage("面板信息已刷新")
+  }
+
   refreshWatchTimer()
 
   // The command has been defined in the package.json file
@@ -1067,6 +1161,11 @@ export function activate(context: vscode.ExtensionContext) {
     addUrlProfile
   )
 
+  const refreshPanelCommand = vscode.commands.registerCommand(
+    "generator-ts-api.profile.refreshPanel",
+    refreshPanelInfo
+  )
+
   const addProfileFromHistoryCommand = vscode.commands.registerCommand(
     "generator-ts-api.profile.addFromHistory",
     async (item: ApiHistoryItem) => addProfileFromUrl(item.url, item.name)
@@ -1158,6 +1257,7 @@ export function activate(context: vscode.ExtensionContext) {
     generateMockCommand,
     generateRequestTemplateCommand,
     addUrlProfileCommand,
+    refreshPanelCommand,
     addProfileFromHistoryCommand,
     editHistoryItemCommand,
     copyHistoryItemCommand,

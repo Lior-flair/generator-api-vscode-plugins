@@ -8,7 +8,13 @@ export interface ApiHistoryItem {
   swaggerVersion?: string
 }
 
-type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "section" | "info"
+export interface ApiConfigRow {
+  key: string
+  label: string
+  value: string
+}
+
+type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "configRoot" | "section" | "info" | "configRow"
 
 export class ApiPanelNode extends vscode.TreeItem {
   constructor(
@@ -16,10 +22,11 @@ export class ApiPanelNode extends vscode.TreeItem {
     label: string,
     public readonly profile?: ApiProfile,
     command?: vscode.Command,
-    public readonly historyItem?: ApiHistoryItem
+    public readonly historyItem?: ApiHistoryItem,
+    public readonly configRow?: ApiConfigRow
   ) {
     const collapsibleState =
-      kind === "profile" || kind === "historyRoot" || kind === "section"
+      kind === "profile" || kind === "historyRoot" || kind === "configRoot" || kind === "section"
         ? vscode.TreeItemCollapsibleState.Expanded
         : vscode.TreeItemCollapsibleState.None
     super(label, collapsibleState)
@@ -33,7 +40,8 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
 
   constructor(
     private readonly profileManager: ApiProfileManager,
-    private readonly getUrlHistory: () => ApiHistoryItem[]
+    private readonly getUrlHistory: () => ApiHistoryItem[],
+    private readonly getConfigRows: () => ApiConfigRow[]
   ) {}
 
   refresh(): void {
@@ -50,11 +58,14 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
       const historyRoot = new ApiPanelNode("historyRoot", "URL 缓存")
       historyRoot.iconPath = new vscode.ThemeIcon("history")
       historyRoot.contextValue = "apiHistoryRoot"
+      const configRoot = new ApiPanelNode("configRoot", "配置")
+      configRoot.iconPath = new vscode.ThemeIcon("settings-gear")
+      configRoot.contextValue = "apiConfigRoot"
       if (profiles.length === 0) {
         const empty = new ApiPanelNode("empty", "暂无 API 配置")
         empty.description = "点击 + 添加"
         empty.iconPath = new vscode.ThemeIcon("info")
-        return [empty, historyRoot]
+        return [empty, historyRoot, configRoot]
       }
       const defaultId = this.profileManager.getDefaultProfileId()
       return profiles.map((profile) => {
@@ -64,7 +75,7 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
         node.contextValue = "apiProfile"
         node.iconPath = this.getStatusIcon(profile.status)
         return node
-      }).concat(historyRoot)
+      }).concat(historyRoot, configRoot)
     }
 
     if (element.kind === "historyRoot") {
@@ -88,6 +99,17 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
       })
     }
 
+    if (element.kind === "configRoot") {
+      return this.getConfigRows().map((row) => {
+        const node = new ApiPanelNode("configRow", row.label, undefined, undefined, undefined, row)
+        node.description = row.value
+        node.tooltip = `${row.key}\n${row.value}`
+        node.contextValue = "apiConfigRow"
+        node.iconPath = new vscode.ThemeIcon("settings")
+        return node
+      })
+    }
+
     if (element.kind === "profile" && element.profile) {
       return [
         this.sectionNode("信息", "info", element.profile),
@@ -107,7 +129,7 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
       return [
         this.infoNode(`状态: ${this.statusText(profile)}`, profile, this.getStatusIcon(profile.status)),
         this.infoNode(`输出: ${outputLabel}`, profile, new vscode.ThemeIcon("folder")),
-        this.infoNode(`模式: ${splitLabel}`, profile, new vscode.ThemeIcon("split-horizontal")),
+        this.infoNode(`上次模式: ${splitLabel}`, profile, new vscode.ThemeIcon("split-horizontal")),
         this.infoNode(`Controller: ${controllerLabel}`, profile, new vscode.ThemeIcon("symbol-class")),
       ]
     }

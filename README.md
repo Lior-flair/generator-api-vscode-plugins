@@ -83,12 +83,17 @@
 4. 首次点击 `更新 API` 时选择输出文件或输出目录；之后会自动复用该路径。
 5. 如只想生成部分模块，进入该配置的 `操作` -> `选择 Controller`。
 6. 后续可直接点击 `更新 API`，或使用 `检查变更` 查看后端文档是否变化。
+7. 需要刷新整个面板时，点击右上角刷新按钮，会重新读取缓存、当前 settings，并检查所有 API 配置状态。
 
 你也可以继续使用命令面板（Windows/Linux：`Ctrl + Shift + P`，macOS：`Cmd + Shift + P`）执行传统 URL / File 生成命令。
 
 ### 侧边栏面板说明
 
-面板分为两部分：
+面板由 API 配置、URL 缓存和配置展示三部分组成。右上角提供三个常用操作：
+
+- `刷新面板信息`：重新读取 URL 缓存、当前 `generator-ts-api.*` settings，并检查所有 API 配置的文档状态。
+- `新增 URL 配置`：新增一个后端 API 文档 URL 配置。
+- `使用默认配置更新 API`：直接用默认 API 配置拉取文档并生成代码。
 
 #### API 配置
 
@@ -96,7 +101,7 @@
 
 - 文档来源 URL
 - 输出路径
-- 输出拆分模式
+- 上次输出拆分模式
 - 选中的 Controller
 - 自动监听开关
 - 最近一次检查/生成状态
@@ -106,7 +111,9 @@
 - `信息`：只读展示状态、输出位置、Controller 范围。
 - `操作`：可点击命令，包括更新 API、检查变更、选择 Controller、设置输出位置、开启/关闭自动监听、设为默认、删除配置。
 
-`设置输出位置` 会根据该 API 配置中缓存的输出拆分模式自动决定选择文件或目录。旧配置没有缓存模式时，会回退读取当前 VS Code 设置中的 `generator-ts-api.outputSplit`。
+生成时会直接读取当前 VS Code 生效的 `generator-ts-api.*` 配置，`.vscode/settings.json` 修改后不需要同步到缓存。
+
+`设置输出位置` 会根据当前 VS Code 设置中的 `generator-ts-api.outputSplit` 自动决定选择文件或目录。面板中的“上次模式”只表示当前保存的输出路径对应的模式；如果后续 settings 中的输出拆分模式发生变化，生成时会重新要求选择兼容的输出位置。
 
 | 模式 | 输出位置 |
 |---|---|
@@ -123,6 +130,10 @@
 - 编辑：修改缓存名称和 URL。
 - 复制：复制 URL 到剪切板。
 - 删除：从缓存列表移除。
+
+#### 配置
+
+`配置` 位于 `URL 缓存` 下方，用于展示当前工作区生效的 `generator-ts-api.*` 设置值。它只展示 settings 的实时值，不再与 API 配置缓存做对比。
 
 ### 文档状态说明
 
@@ -150,6 +161,7 @@
 - `generator-ts-api.generateMock`：生成 Mock 数据（JSON / MSW / json-server）
 - `generator-ts-api.generateRequestTemplate`：独立生成封装 Request 模板文件
 - `generator-ts-api.profile.addUrl`：新增 URL 配置
+- `generator-ts-api.profile.refreshPanel`：刷新面板信息并检查所有 API 配置状态
 - `generator-ts-api.profile.generateDefault`：使用默认 API 配置更新
 - `generator-ts-api.profile.generate`：更新当前 API 配置
 - `generator-ts-api.profile.check`：检查 API 文档变更
