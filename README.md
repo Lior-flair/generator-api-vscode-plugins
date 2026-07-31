@@ -100,7 +100,7 @@ export class UserController {
   /**
    * 获取用户列表
    */
-  static list(
+  static UserList(
     params: { name?: string; page?: number } = {} as any,
     options: RequestConfig = {}
   ): Promise<{ list: UserVO[]; total: number }> {
@@ -131,6 +131,52 @@ export interface UserVO {
 
 ### VS Code 设置
 [配置项速查](./Releases.md)
+
+### static 方法名唯一性
+
+生成器默认使用 path 末段作为 `static` 方法名。开启 `generator-ts-api.naming.methodNamePathSuffixesEnabled` 后，对于不同业务下经常重复的通用后缀，会自动再向前取一段 path，避免同一 Controller 内重名，并保证接口增删或顺序变化后方法名仍然稳定。
+
+```text
+/user/list          → static UserList
+/order/list         → static OrderList
+/order/detail/{id}  → static OrderDetailById
+/file/download      → static FileDownload
+```
+
+该开关默认是 `false`，以保持旧版本命名结果。启用方式：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true
+}
+```
+
+可通过 `generator-ts-api.naming.methodNamePathSuffixes` 调整触发规则，默认列表包含：
+
+```text
+list, detail, page, info, get, query, search, tree, options, select,
+count, check, add, create, save, update, edit, delete, remove, batch,
+enable, disable, status, import, export, upload, download
+```
+
+关闭开关或把后缀配置为 `[]`，都会恢复为仅在实际重名时才向前拼接 path。
+
+如只希望处理特定 Controller，可配置作用域：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "User",
+      "pathPrefix": "/user"
+    }
+  ]
+}
+```
+
+配置作用域后，只有 Controller 和 path 前缀同时匹配的接口才采用新规则。方法名使用 `pathPrefix` 后的完整静态路径，例如 `user/page` 固定生成 `UserPage`；以后新增其他 `page` 接口不会改变已有名称。空作用域数组 `[]` 表示对所有 Controller 生效。
 
 ## 贡献指南
 

@@ -4,6 +4,42 @@
 
 ### 新增功能
 
+#### static 方法名唯一性
+
+新增 `generator-ts-api.naming.methodNamePathSuffixesEnabled` 和 `generator-ts-api.naming.methodNamePathSuffixes` 配置。开关启用后，path 最后一个非参数段命中配置时，方法名会直接再向前拼接一个非参数 path 段，而不是等到发生重名后再处理。
+
+| path | 生成方法名 |
+|---|---|
+| `/user/list` | `UserList` |
+| `/order/list` | `OrderList` |
+| `/order/detail/{id}` | `OrderDetailById` |
+| `/file/download` | `FileDownload` |
+
+默认后缀：
+
+```text
+list, detail, page, info, get, query, search, tree, options, select,
+count, check, add, create, save, update, edit, delete, remove, batch,
+enable, disable, status, import, export, upload, download
+```
+
+开关默认值为 `false`，确保升级后保持旧版本方法名。启用后对 `single`、`byTag`、Swagger 2.x 和 OpenAPI 3.x 均生效。可追加项目自定义后缀，也可关闭开关或配置为 `[]` 恢复旧规则。
+
+可通过 `generator-ts-api.naming.methodNamePathSuffixScopes` 将规则限制到指定 Controller 和 path 前缀。命中作用域后，生成器使用前缀后的完整静态路径生成名称，从而避免新增同后缀接口导致已有方法名变化。
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "User",
+      "pathPrefix": "/user"
+    }
+  ]
+}
+```
+
 #### Mock 数据自动生成
 
 新增命令 `generator-ts-api.generateMock`，基于 API 文档的 Schema 和 `example` 字段，一键生成本地 Mock 脚本或 JSON 数据，支持三种输出格式：
@@ -159,7 +195,7 @@ export const handlers = [
 
 #### 命名规范（`naming`）
 
-新增四个命名配置项，仅在 `byTag` 模式下生效：
+命名配置项如下。目录、文件和类名配置仅在 `byTag` 模式下生效；方法名 path 后缀配置在所有输出模式下生效：
 
 | 配置键 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
@@ -167,6 +203,9 @@ export const handlers = [
 | `naming.controllersDirName` | string | `modules` | 控制器文件夹名称 |
 | `naming.controllerFileNameCasing` | enum | `default` | 控制器文件名命名风格 |
 | `naming.controllerClassNameSuffix` | string | `""` | 类名及文件名后缀 |
+| `naming.methodNamePathSuffixesEnabled` | boolean | `false` | 是否启用通用 path 后缀提前拼接；默认关闭以兼容旧版本 |
+| `naming.methodNamePathSuffixes` | string[] | 常用后缀列表 | 命中时向前拼接一个 path 段，保持 static 方法名唯一且稳定 |
+| `naming.methodNamePathSuffixScopes` | object[] | `[]` | 定向作用域；包含 `controller` 和 `pathPrefix`，空数组表示全局生效 |
 
 `controllerFileNameCasing` 可选值：
 
@@ -204,6 +243,14 @@ export const handlers = [
   "generator-ts-api.naming.controllersDirName": "modules",
   "generator-ts-api.naming.controllerFileNameCasing": "default", // "PascalCase" | "camelCase" | "kebab-case"
   "generator-ts-api.naming.controllerClassNameSuffix": "",
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": false,
+  "generator-ts-api.naming.methodNamePathSuffixes": [
+    "list", "detail", "page", "info", "get", "query", "search",
+    "tree", "options", "select", "count", "check",
+    "add", "create", "save", "update", "edit", "delete", "remove", "batch",
+    "enable", "disable", "status", "import", "export", "upload", "download"
+  ],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [],
 
   // HTTP 客户端模式
   "generator-ts-api.httpClient": "axios-wrapper", // "axios" | "fetch" | "custom"

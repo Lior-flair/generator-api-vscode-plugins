@@ -1,10 +1,18 @@
 {
   "name": "generator-ts-api",
   "displayName": "generator-ts-api",
-  "description": "从后端API文档生成前端TypeScript/JavaScript代码",
+  "description": "从 Swagger 2.x / OpenAPI 3.x 文档生成可直接调用的 TypeScript/JavaScript API、类型定义与 Mock 数据",
   "icon": "1759111754.png",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Lior",
+  "license": "MIT",
+  "keywords": [
+    "swagger",
+    "openapi",
+    "typescript",
+    "api-generator",
+    "mock"
+  ],
   "publishConfig": {
     
   },
@@ -20,19 +28,19 @@
     "commands": [
       {
         "command": "generator-ts-api.generate",
-        "title": "生成api文档"
+        "title": "生成 API 代码"
       },
       {
         "command": "generator-ts-api.generateFromUrl",
-        "title": "从url生成api文档"
+        "title": "从 URL 生成 API 代码"
       },
       {
         "command": "generator-ts-api.generateFromFile",
-        "title": "从文件生成api文档"
+        "title": "从文件生成 API 代码"
       },
       {
         "command": "generator-ts-api.generateMock",
-        "title": "生成Mock数据"
+        "title": "生成 Mock 数据"
       }
     ],
     "configuration": {
@@ -111,6 +119,40 @@
           "type": "string",
           "default": "",
           "description": "byTag 模式下 Controller 类名及文件名的后缀（如填 Controller 则生成 UserController，留空则为 User）"
+        },
+        "generator-ts-api.naming.methodNamePathSuffixesEnabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "是否启用通用 path 后缀提前拼接规则。默认关闭以兼容旧版本；开启后 `/user/list` 将生成 `UserList`。"
+        },
+        "generator-ts-api.naming.methodNamePathSuffixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": ["list", "detail", "page", "info", "get", "query", "search", "tree", "options", "select", "count", "check", "add", "create", "save", "update", "edit", "delete", "remove", "batch", "enable", "disable", "status", "import", "export", "upload", "download"],
+          "markdownDescription": "生成 `static` 方法名时需要额外向前拼接一个 path 段的通用后缀。例如 `/user/list` 生成 `UserList`。配置为 `[]` 可关闭预判规则；匹配时忽略大小写。"
+        },
+        "generator-ts-api.naming.methodNamePathSuffixScopes": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "required": ["controller", "pathPrefix"],
+            "properties": {
+              "controller": {
+                "type": "string",
+                "description": "生成后的 Controller 名称（OpenAPI Tag 清理特殊字符后的名称）"
+              },
+              "pathPrefix": {
+                "type": "string",
+                "description": "需要定向处理的 path 前缀，例如 /client"
+              }
+            },
+            "additionalProperties": false
+          },
+          "markdownDescription": "通用 path 后缀规则的定向作用域。配置后只处理匹配的 Controller 和 path 前缀，并使用前缀后的完整静态路径生成稳定方法名；空数组表示不限制作用域。"
         },
         "generator-ts-api.httpClient": {
           "type": "string",

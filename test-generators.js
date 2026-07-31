@@ -9,9 +9,44 @@ const os = require("os")
 // 确保已编译
 const { ApiGenerator: ApiGeneratorV2 } = require("./out/generatorV2")
 const { ApiGenerator: ApiGeneratorV3 } = require("./out/generatorV3")
+const { buildUniqueMethodName } = require("./out/generatorCommon")
 
 const tmpDir = path.join(os.tmpdir(), "generator-ts-api-test-" + Date.now())
 fs.mkdirSync(tmpDir, { recursive: true })
+
+function testMethodNamePathSuffixes() {
+  console.log("\n[Static method name - 通用 path 后缀]")
+  globalThis._controllerMethodNames = {}
+  check("默认关闭以兼容旧版", buildUniqueMethodName("/user/list", "Demo", "get") === "List")
+
+  globalThis._controllerMethodNames = {}
+  check("开启后 list 向前取一段", buildUniqueMethodName("/user/list", "Demo", "get", undefined, undefined, true) === "UserList")
+  check("开启后 detail 向前取一段", buildUniqueMethodName("/order/detail/{id}", "Demo", "get", undefined, undefined, true) === "OrderDetailById")
+  check("开启后 add 向前取一段", buildUniqueMethodName("/user/add", "Demo", "post", undefined, undefined, true) === "UserAdd")
+  check("开启后 export 向前取一段", buildUniqueMethodName("/order/export", "Demo", "get", undefined, undefined, true) === "OrderExport")
+  check("普通后缀保持原规则", buildUniqueMethodName("/user/archive", "Demo", "get") === "Archive")
+
+  globalThis._controllerMethodNames = {}
+  check(
+    "支持配置额外后缀",
+    buildUniqueMethodName("/user/archive", "Demo", "post", undefined, ["archive"], true) === "UserArchive"
+  )
+
+  globalThis._controllerMethodNames = {}
+  const clientScope = [{ controller: "客户端小程序", pathPrefix: "/client" }]
+  check(
+    "scope 内使用完整相对路径",
+    buildUniqueMethodName("/client/invoice/order/page", "客户端小程序", "get", undefined, ["page", "detail"], true, clientScope) === "InvoiceOrderPage"
+  )
+  check(
+    "scope 内较短路径保持稳定",
+    buildUniqueMethodName("/client/order/page", "客户端小程序", "get", undefined, ["page", "detail"], true, clientScope) === "OrderPage"
+  )
+  check(
+    "scope 外 Controller 保持旧规则",
+    buildUniqueMethodName("/client/order/detail", "后台订单", "get", undefined, ["page", "detail"], true, clientScope) === "Detail"
+  )
+}
 
 // ─── 测试数据 ──────────────────────────────────────────────────────────────────
 
@@ -544,6 +579,7 @@ async function main() {
   console.log("=".repeat(60))
 
   try {
+    testMethodNamePathSuffixes()
     await testV2SingleFile()
     await testV2ByTag()
     await testV3SingleFile()

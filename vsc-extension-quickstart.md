@@ -1,44 +1,49 @@
-# Welcome to your VS Code Extension
+# generator-ts-api 开发指南
 
-## What's in the folder
+## 环境要求
 
-* This folder contains all of the files necessary for your extension.
-* `package.json` - this is the manifest file in which you declare your extension and command.
-  * The sample plugin registers a command and defines its title and command name. With this information VS Code can show the command in the command palette. It doesn’t yet need to load the plugin.
-* `src/extension.ts` - this is the main file where you will provide the implementation of your command.
-  * The file exports one function, `activate`, which is called the very first time your extension is activated (in this case by executing the command). Inside the `activate` function we call `registerCommand`.
-  * We pass the function containing the implementation of the command as the second parameter to `registerCommand`.
+- Node.js 20.x
+- VS Code 1.60 或更高版本
+- npm
 
-## Get up and running straight away
+## 本地开发
 
-* Press `F5` to open a new window with your extension loaded.
-* Run your command from the command palette by pressing (`Ctrl+Shift+P` or `Cmd+Shift+P` on Mac) and typing `Hello World`.
-* Set breakpoints in your code inside `src/extension.ts` to debug your extension.
-* Find output from your extension in the debug console.
+```bash
+npm install
+npm run compile
+```
 
-## Make changes
+在 VS Code 中按 `F5` 启动 Extension Development Host，然后从命令面板执行：
 
-* You can relaunch the extension from the debug toolbar after changing code in `src/extension.ts`.
-* You can also reload (`Ctrl+R` or `Cmd+R` on Mac) the VS Code window with your extension to load your changes.
+- `生成 API 代码`
+- `从 URL 生成 API 代码`
+- `从文件生成 API 代码`
+- `生成 Mock 数据`
 
-## Explore the API
+修改 TypeScript 源码时可运行：
 
-* You can open the full set of our API when you open the file `node_modules/@types/vscode/index.d.ts`.
+```bash
+npm run watch
+```
 
-## Run tests
+## 验证
 
-* Install the [Extension Test Runner](https://marketplace.visualstudio.com/items?itemName=ms-vscode.extension-test-runner)
-* Run the "watch" task via the **Tasks: Run Task** command. Make sure this is running, or tests might not be discovered.
-* Open the Testing view from the activity bar and click the Run Test" button, or use the hotkey `Ctrl/Cmd + ; A`
-* See the output of the test result in the Test Results view.
-* Make changes to `src/test/extension.test.ts` or create new test files inside the `test` folder.
-  * The provided test runner will only consider files matching the name pattern `**.test.ts`.
-  * You can create folders inside the `test` folder to structure your tests any way you want.
+```bash
+npm run compile
+node test-generators.js
+```
 
-## Go further
+测试覆盖 Swagger 2.x、OpenAPI 3.x、单文件/按 Tag 输出、HTTP 客户端模式、类型映射、Mock 生成以及 static 方法名唯一性规则。
 
-* [Follow UX guidelines](https://code.visualstudio.com/api/ux-guidelines/overview) to create extensions that seamlessly integrate with VS Code's native interface and patterns.
-* Reduce the extension size and improve the startup time by [bundling your extension](https://code.visualstudio.com/api/working-with-extensions/bundling-extension).
-* [Publish your extension](https://code.visualstudio.com/api/working-with-extensions/publishing-extension) on the VS Code extension marketplace.
-* Automate builds by setting up [Continuous Integration](https://code.visualstudio.com/api/working-with-extensions/continuous-integration).
-* Integrate to the [report issue](https://code.visualstudio.com/api/get-started/wrapping-up#issue-reporting) flow to get issue and feature requests reported by users.
+## 打包
+
+```bash
+npm run build
+```
+
+发布前应确认：
+
+- `package.json` 中的配置声明与 `README.md`、`Releases.md`、`Example.md` 一致。
+- `npm run compile` 无 TypeScript 错误。
+- `node test-generators.js` 全部通过。
+- 新增配置具备默认值、说明和回归测试。

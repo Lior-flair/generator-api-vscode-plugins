@@ -4,13 +4,59 @@ export interface NamingConfig {
   controllersDirName: string
   controllerFileNameCasing: "default" | "PascalCase" | "camelCase" | "kebab-case"
   controllerClassNameSuffix: string
+  /** 是否启用通用 path 后缀提前拼接规则；默认关闭以兼容旧版本 */
+  methodNamePathSuffixesEnabled?: boolean
+  /** 命中这些通用 path 后缀时，方法名默认再向前拼接一个 path 段 */
+  methodNamePathSuffixes?: string[]
+  /** 定向应用通用后缀规则；为空时对全部 Controller 生效 */
+  methodNamePathSuffixScopes?: MethodNamePathSuffixScope[]
 }
+
+export interface MethodNamePathSuffixScope {
+  /** 生成后的 Controller 名称（即 OpenAPI Tag 清理特殊字符后的名称） */
+  controller: string
+  /** Controller 下需要处理的 path 前缀，例如 /client */
+  pathPrefix: string
+}
+
+export const DEFAULT_METHOD_NAME_PATH_SUFFIXES = [
+  "list",
+  "detail",
+  "page",
+  "info",
+  "get",
+  "query",
+  "search",
+  "tree",
+  "options",
+  "select",
+  "count",
+  "check",
+  "add",
+  "create",
+  "save",
+  "update",
+  "edit",
+  "delete",
+  "remove",
+  "batch",
+  "enable",
+  "disable",
+  "status",
+  "import",
+  "export",
+  "upload",
+  "download",
+]
 
 export const DEFAULT_NAMING: NamingConfig = {
   typesDirName: "types",
   controllersDirName: "controllers",
   controllerFileNameCasing: "default",
   controllerClassNameSuffix: "",
+  methodNamePathSuffixesEnabled: false,
+  methodNamePathSuffixes: DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+  methodNamePathSuffixScopes: [],
 }
 
 export function sanitizeName(name: string): string {
@@ -323,12 +369,50 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
   fs.writeFileSync(scaffoldPath, content, "utf-8")
 }
 
-export function buildUniqueMethodName(path: string, controllerName: string, method: string, operationId?: string): string {
+export function buildUniqueMethodName(
+  path: string,
+  controllerName: string,
+  method: string,
+  operationId?: string,
+  methodNamePathSuffixes: string[] = DEFAULT_NAMING.methodNamePathSuffixes || [],
+  methodNamePathSuffixesEnabled: boolean = DEFAULT_NAMING.methodNamePathSuffixesEnabled || false,
+  methodNamePathSuffixScopes: MethodNamePathSuffixScope[] = DEFAULT_NAMING.methodNamePathSuffixScopes || []
+): string {
   const usedNames = getControllerMethodNameSet(controllerName)
   const pathParts = path.split("/").filter(Boolean)
   let partStartIndex = pathParts.length > 0 ? pathParts.length - 1 : -1
   const partsIndex: number[] = []
   const isParam = (part: string) => /^\{.+\}$/.test(part)
+  const normalizePath = (value: string) => "/" + value.split("/").filter(Boolean).join("/")
+  const normalizedPath = normalizePath(path)
+  const matchedScope = methodNamePathSuffixScopes.find((scope) => {
+    const prefix = normalizePath(scope.pathPrefix)
+    return (
+      scope.controller === controllerName &&
+      (normalizedPath === prefix || normalizedPath.startsWith(prefix + "/"))
+    )
+  })
+  const suffixRuleApplies =
+    methodNamePathSuffixesEnabled &&
+    (methodNamePathSuffixScopes.length === 0 || Boolean(matchedScope))
+  const normalizedSuffixes = new Set(
+    suffixRuleApplies
+      ? methodNamePathSuffixes.map((suffix) => suffix.trim().toLowerCase()).filter(Boolean)
+      : []
+  )
+  const lastStaticPart = [...pathParts].reverse().find((part) => !isParam(part))
+  let minimumStaticParts = 1
+  if (lastStaticPart && normalizedSuffixes.has(lastStaticPart.toLowerCase())) {
+    if (matchedScope) {
+      const prefixPartCount = normalizePath(matchedScope.pathPrefix).split("/").filter(Boolean).length
+      minimumStaticParts = Math.max(
+        1,
+        pathParts.slice(prefixPartCount).filter((part) => !isParam(part)).length
+      )
+    } else {
+      minimumStaticParts = 2
+    }
+  }
   let bySuffix = ""
 
   while (partStartIndex >= 0) {
@@ -351,7 +435,7 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
             return str.charAt(0).toUpperCase() + str.slice(1)
           })
           .join("") + bySuffix
-      if (usedNames.has(`${controllerName}.${candidate}`)) {
+      if (partsIndex.length < minimumStaticParts || usedNames.has(`${controllerName}.${candidate}`)) {
         partStartIndex--
       } else {
         partStartIndex = -1

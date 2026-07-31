@@ -233,7 +233,12 @@
   "generator-ts-api.naming.typesDirName": "types",
   "generator-ts-api.naming.controllersDirName": "modules",
   "generator-ts-api.naming.controllerFileNameCasing": "kebab-case",
-  "generator-ts-api.naming.controllerClassNameSuffix": "Service"
+  "generator-ts-api.naming.controllerClassNameSuffix": "Service",
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": [
+    "list", "detail", "page", "add", "update", "delete", "export"
+  ],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": []
 }
 ```
 
@@ -331,7 +336,15 @@ output/
   "generator-ts-api.naming.typesDirName": "types",
   "generator-ts-api.naming.controllersDirName": "modules",
   "generator-ts-api.naming.controllerFileNameCasing": "kebab-case",
-  "generator-ts-api.naming.controllerClassNameSuffix": "Service"
+  "generator-ts-api.naming.controllerClassNameSuffix": "Service",
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": [
+    "list", "detail", "page", "info", "get", "query", "search",
+    "tree", "options", "select", "count", "check",
+    "add", "create", "save", "update", "edit", "delete", "remove", "batch",
+    "enable", "disable", "status", "import", "export", "upload", "download"
+  ],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": []
 }
 ```
 
@@ -366,6 +379,44 @@ output/
 3. `typeMapping.formatMap` 最后覆盖（优先级最高）。
 
 即：`formatMap` > `dateTimeTarget` > `compatibilityVersion 默认映射`。
+
+---
+
+## 19) static 方法名通用后缀
+
+适合：同一个 Controller 中包含 `/user/list`、`/order/list`、`/user/detail` 等重复动作后缀。
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "客户端小程序",
+      "pathPrefix": "/client"
+    }
+  ]
+}
+```
+
+生成结果：
+
+```text
+/client/invoice/application/detail → InvoiceApplicationDetail
+/client/invoice/title/detail       → InvoiceTitleDetail
+/client/order/detail               → OrderDetail
+/client/invoice/order/page         → InvoiceOrderPage
+/client/order/page                 → OrderPage
+```
+
+规则说明：
+
+- 匹配不区分大小写。
+- `methodNamePathSuffixesEnabled` 默认为 `false`，旧项目升级后方法名不会变化。
+- `methodNamePathSuffixScopes` 为空时，命中后缀会向前取一段 path。
+- 配置作用域后，只有 Controller 与 path 前缀同时匹配才处理，并使用前缀后的完整静态路径。
+- 如果拼接后仍然重名，会继续向前取 path。
+- 关闭开关或配置为 `[]` 时，恢复为仅在实际重名时扩展方法名。
 
 ---
 

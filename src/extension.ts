@@ -8,6 +8,7 @@ import { ApiParser } from "./parser"
 import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
 import {
   type CompatibilityVersion,
+  DEFAULT_METHOD_NAME_PATH_SUFFIXES,
   type FormatTypeMappings,
   generateRequestScaffoldFile,
   type HttpClientConfig,
@@ -122,6 +123,9 @@ export function activate(context: vscode.ExtensionContext) {
         controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
         controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
         controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+        methodNamePathSuffixesEnabled: (config.get("naming.methodNamePathSuffixesEnabled") as boolean) ?? false,
+        methodNamePathSuffixes: (config.get("naming.methodNamePathSuffixes") as string[]) || DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+        methodNamePathSuffixScopes: (config.get("naming.methodNamePathSuffixScopes") as Array<{ controller: string; pathPrefix: string }>) || [],
       }
 
       // 右侧 loading
@@ -265,6 +269,9 @@ export function activate(context: vscode.ExtensionContext) {
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+            methodNamePathSuffixesEnabled: (config.get("naming.methodNamePathSuffixesEnabled") as boolean) ?? false,
+            methodNamePathSuffixes: (config.get("naming.methodNamePathSuffixes") as string[]) || DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+            methodNamePathSuffixScopes: (config.get("naming.methodNamePathSuffixScopes") as Array<{ controller: string; pathPrefix: string }>) || [],
           }
 
           let outputFsPath: string | undefined
@@ -358,6 +365,9 @@ export function activate(context: vscode.ExtensionContext) {
             controllersDirName: (config.get("naming.controllersDirName") as string) || "controllers",
             controllerFileNameCasing: ((config.get("naming.controllerFileNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
             controllerClassNameSuffix: (config.get("naming.controllerClassNameSuffix") as string) || "",
+            methodNamePathSuffixesEnabled: (config.get("naming.methodNamePathSuffixesEnabled") as boolean) ?? false,
+            methodNamePathSuffixes: (config.get("naming.methodNamePathSuffixes") as string[]) || DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+            methodNamePathSuffixScopes: (config.get("naming.methodNamePathSuffixScopes") as Array<{ controller: string; pathPrefix: string }>) || [],
           }
 
           let outputFsPath: string | undefined
