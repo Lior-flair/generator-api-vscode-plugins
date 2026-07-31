@@ -144,6 +144,51 @@ Controller Class 与 Controller 文件名共用命名来源和 suffix 配置。
 List_v2
 ```
 
+### 通用 path 后缀稳定命名
+
+默认关闭，以保证升级后已有项目的方法名不变：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": false
+}
+```
+
+可按原始 OpenAPI Tag/Controller 和 path 前缀定向开启：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "移动端应用",
+      "pathPrefix": "/mobile-api"
+    }
+  ]
+}
+```
+
+作用域命中时，方法名使用 `pathPrefix` 后的完整静态路径：
+
+```text
+/mobile-api/billing/application/detail → BillingApplicationDetail
+/mobile-api/billing/title/detail       → BillingTitleDetail
+/mobile-api/order/detail               → OrderDetail
+/mobile-api/billing/order/page         → BillingOrderPage
+/mobile-api/order/page                 → OrderPage
+```
+
+规则说明：
+
+- `controller` 匹配原始 `tags.name` 或清理特殊字符后的 Controller key，不受英文类名映射影响。
+- `pathPrefix` 按完整路径段匹配，`/mobile-api` 不会误匹配 `/mobile-api-v2`。
+- 后缀匹配不区分大小写。
+- 配置了作用域时，只有 Controller 与 path 前缀同时匹配才处理。
+- 作用域为 `[]` 时，新规则对所有 Controller 生效，并默认向前取一个静态 path 段。
+- 最终结果继续应用 `methodNameCasing`。
+- 关闭开关后完全使用旧版冲突处理逻辑。
+
 ## Params Interface 命名
 
 当前没有单独配置。参数类型名优先只使用 Method 名：

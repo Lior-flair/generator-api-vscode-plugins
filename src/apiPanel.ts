@@ -40,7 +40,7 @@ const CONFIG_GROUPS: ApiConfigGroup[] = [
     id: "output",
     label: "生成输出",
     icon: "output",
-    keys: ["framework", "outputType", "outputSplit", "cleanOutputDir"],
+    keys: ["framework", "outputType", "outputSplit", "outputPath", "outputPathSplit", "cleanOutputDir"],
   },
   {
     id: "http",
@@ -62,6 +62,9 @@ const CONFIG_GROUPS: ApiConfigGroup[] = [
       "naming.skipDuplicateControllerClassNameSuffix",
       "naming.methodNameCasing",
       "naming.typeNameCasing",
+      "naming.methodNamePathSuffixesEnabled",
+      "naming.methodNamePathSuffixes",
+      "naming.methodNamePathSuffixScopes",
     ],
   },
   {
@@ -232,8 +235,10 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
 
     if (element.kind !== "section" || !element.profile) return []
     const profile = element.profile
-    const outputLabel = profile.outputPath ? path.basename(profile.outputPath) : "未设置"
-    const splitLabel = profile.outputSplit || "跟随设置"
+    const config = vscode.workspace.getConfiguration("generator-ts-api")
+    const globalOutputPath = (config.get("outputPath") as string) || ""
+    const outputLabel = globalOutputPath ? path.basename(globalOutputPath) : "未设置"
+    const splitLabel = (config.get("outputPathSplit") as string) || "跟随设置"
     const controllerLabel = profile.selectedControllers?.length
       ? `${profile.selectedControllers.length} 个`
       : "全部"
@@ -305,10 +310,12 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
 
   private buildProfileTooltip(profile: ApiProfile): string {
     const source = profile.sourceType === "url" ? profile.url : profile.filePath
+    const config = vscode.workspace.getConfiguration("generator-ts-api")
+    const globalOutputPath = (config.get("outputPath") as string) || ""
     return [
       profile.name,
       source ? `来源: ${source}` : "",
-      profile.outputPath ? `输出: ${profile.outputPath}` : "",
+      globalOutputPath ? `全局输出: ${globalOutputPath}` : "",
       profile.statusMessage ? `状态: ${profile.statusMessage}` : "",
     ].filter(Boolean).join("\n")
   }

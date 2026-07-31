@@ -1,5 +1,23 @@
 # Change Log
 
+## [Unreleased]
+
+#### 工作区全局输出位置
+
+- 新增 `generator-ts-api.outputPath` 与 `generator-ts-api.outputPathSplit` 工作区配置。
+- 侧边栏每个 API 下仍保留“设置输出位置”，但统一读写工作区 `settings.json`，切换 API 不再重复选择。
+- 工作区内的输出位置保存为 `${workspaceFolder}` 相对路径；支持多根工作区变量和普通相对路径，工作区外位置才保留绝对路径。
+- 旧版 API 配置档案中的输出位置会在首次生成时自动迁移到工作区配置。
+- 当输出拆分模式变化时，仍会要求重新选择与新模式兼容的文件或目录。
+
+#### 定向稳定 static 方法名
+
+- 新增 `generator-ts-api.naming.methodNamePathSuffixesEnabled`，默认关闭以兼容旧版本。
+- 新增 `generator-ts-api.naming.methodNamePathSuffixes`，配置需要稳定命名的通用 path 后缀。
+- 新增 `generator-ts-api.naming.methodNamePathSuffixScopes`，可按原始 Tag/Controller 与 path 前缀定向处理。
+- 作用域命中时使用前缀后的完整静态路径生成方法名，避免后端新增同后缀接口导致已有前端 static 定义变化。
+- 新规则继续遵循 `methodNameCasing`，并同时支持 Swagger 2.x 与 OpenAPI 3.x。
+
 ## [0.3.5] - 2026年7月8日
 
 #### Controller 命名修复

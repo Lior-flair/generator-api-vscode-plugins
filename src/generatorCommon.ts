@@ -13,7 +13,50 @@ export interface NamingConfig {
    * 否则按所选风格归一化类型定义名与类型表达式中的标识符。
    */
   typeNameCasing: "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case"
+  /** 是否启用通用 path 后缀稳定命名；默认关闭以兼容旧版本 */
+  methodNamePathSuffixesEnabled: boolean
+  /** 需要稳定命名的通用 path 后缀 */
+  methodNamePathSuffixes: string[]
+  /** 定向作用域；为空时对所有 Controller 生效 */
+  methodNamePathSuffixScopes: MethodNamePathSuffixScope[]
 }
+
+export interface MethodNamePathSuffixScope {
+  /** 原始 OpenAPI Tag 名称或清理特殊字符后的 Controller key */
+  controller: string
+  /** 需要处理的 path 前缀，例如 /mobile-api */
+  pathPrefix: string
+}
+
+export const DEFAULT_METHOD_NAME_PATH_SUFFIXES = [
+  "list",
+  "detail",
+  "page",
+  "info",
+  "get",
+  "query",
+  "search",
+  "tree",
+  "options",
+  "select",
+  "count",
+  "check",
+  "add",
+  "create",
+  "save",
+  "update",
+  "edit",
+  "delete",
+  "remove",
+  "batch",
+  "enable",
+  "disable",
+  "status",
+  "import",
+  "export",
+  "upload",
+  "download",
+]
 
 export const DEFAULT_NAMING: NamingConfig = {
   typesDirName: "types",
@@ -25,6 +68,9 @@ export const DEFAULT_NAMING: NamingConfig = {
   skipDuplicateControllerClassNameSuffix: true,
   methodNameCasing: "default",
   typeNameCasing: "follow",
+  methodNamePathSuffixesEnabled: false,
+  methodNamePathSuffixes: DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+  methodNamePathSuffixScopes: [],
 }
 
 /** 解析最终生效的「类型名命名风格」：follow 时回退到 methodNameCasing */
@@ -717,15 +763,53 @@ export function generateRequestScaffoldFile(outputDir: string, cfg: HttpClientCo
 
 export function buildUniqueMethodName(path: string, controllerName: string, method: string, operationId?: string, naming?: NamingConfig): string {
   const usedNames = getControllerMethodNameSet(controllerName)
-  const useDefaultCasing = !naming || naming.methodNameCasing === "default"
+  const effectiveNaming = naming || DEFAULT_NAMING
+  const useDefaultCasing = effectiveNaming.methodNameCasing === "default"
   const normalizeMethodName = (name: string): string => {
     if (useDefaultCasing) return sanitizeName(name)
-    return applyFileCasing(name, naming.methodNameCasing)
+    return applyFileCasing(name, effectiveNaming.methodNameCasing)
   }
   const pathParts = path.split("/").filter(Boolean)
   let partStartIndex = pathParts.length > 0 ? pathParts.length - 1 : -1
   const partsIndex: number[] = []
   const isParam = (part: string) => /^\{.+\}$/.test(part)
+  const normalizePath = (value: string): string =>
+    "/" + String(value).split("/").filter(Boolean).join("/")
+  const normalizedPath = normalizePath(path)
+  const scopes = effectiveNaming.methodNamePathSuffixScopes || []
+  const matchedScope = scopes.find((scope) => {
+    const prefix = normalizePath(scope.pathPrefix)
+    const controllerMatches =
+      scope.controller === controllerName ||
+      sanitizeName(scope.controller) === controllerName
+    return (
+      controllerMatches &&
+      (normalizedPath === prefix || normalizedPath.startsWith(prefix + "/"))
+    )
+  })
+  const suffixRuleApplies =
+    effectiveNaming.methodNamePathSuffixesEnabled &&
+    (scopes.length === 0 || Boolean(matchedScope))
+  const configuredSuffixes = new Set(
+    suffixRuleApplies
+      ? (effectiveNaming.methodNamePathSuffixes || [])
+          .map((suffix) => String(suffix).trim().toLowerCase())
+          .filter(Boolean)
+      : []
+  )
+  const lastStaticPart = [...pathParts].reverse().find((part) => !isParam(part))
+  let minimumStaticParts = 1
+  if (lastStaticPart && configuredSuffixes.has(lastStaticPart.toLowerCase())) {
+    if (matchedScope) {
+      const prefixPartCount = normalizePath(matchedScope.pathPrefix).split("/").filter(Boolean).length
+      minimumStaticParts = Math.max(
+        1,
+        pathParts.slice(prefixPartCount).filter((part) => !isParam(part)).length
+      )
+    } else {
+      minimumStaticParts = 2
+    }
+  }
   let bySuffix = ""
 
   while (partStartIndex >= 0) {
@@ -747,7 +831,10 @@ export function buildUniqueMethodName(path: string, controllerName: string, meth
           })
           .join("") + bySuffix
       const candidate = normalizeMethodName(rawCandidate)
-      if (usedNames.has(`${controllerName}.${candidate}`)) {
+      if (
+        partsIndex.length < minimumStaticParts ||
+        usedNames.has(`${controllerName}.${candidate}`)
+      ) {
         partStartIndex--
       } else {
         partStartIndex = -1

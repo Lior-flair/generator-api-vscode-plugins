@@ -27,6 +27,57 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(methodName, 'UpdateByIdByStatus');
 	});
 
+	test('buildUniqueMethodName should keep legacy output when stable suffix naming is disabled', () => {
+		(globalThis as any)._controllerMethodNames = {};
+		const methodName = buildUniqueMethodName('/mobile-api/order/page', '移动端应用', 'get', undefined, DEFAULT_NAMING);
+		assert.strictEqual(methodName, 'Page');
+	});
+
+	test('buildUniqueMethodName should use the full scoped relative path for stable names', () => {
+		(globalThis as any)._controllerMethodNames = {};
+		const naming = {
+			...DEFAULT_NAMING,
+			methodNamePathSuffixesEnabled: true,
+			methodNamePathSuffixes: ['page', 'detail'],
+			methodNamePathSuffixScopes: [
+				{ controller: '移动端应用', pathPrefix: '/mobile-api' },
+			],
+		};
+		assert.strictEqual(
+			buildUniqueMethodName('/mobile-api/billing/order/page', '移动端应用', 'get', undefined, naming),
+			'BillingOrderPage'
+		);
+		assert.strictEqual(
+			buildUniqueMethodName('/mobile-api/order/page', '移动端应用', 'get', undefined, naming),
+			'OrderPage'
+		);
+		assert.strictEqual(
+			buildUniqueMethodName('/mobile-api/order/detail', '后台订单', 'get', undefined, naming),
+			'Detail'
+		);
+	});
+
+	test('stable suffix naming should preserve methodNameCasing', () => {
+		(globalThis as any)._controllerMethodNames = {};
+		const naming = {
+			...DEFAULT_NAMING,
+			methodNameCasing: 'camelCase' as const,
+			methodNamePathSuffixesEnabled: true,
+			methodNamePathSuffixes: ['detail'],
+			methodNamePathSuffixScopes: [
+				{ controller: '移动端应用', pathPrefix: '/mobile-api' },
+			],
+		};
+		const methodName = buildUniqueMethodName(
+			'/mobile-api/billing/title/detail',
+			'移动端应用',
+			'get',
+			undefined,
+			naming
+		);
+		assert.strictEqual(methodName, 'billingTitleDetail');
+	});
+
 	test('buildImportSnippet should directly use requestImportPath when directReplacementRequestImportPath is true', () => {
 		const importLine = buildImportSnippet({
 			...DEFAULT_HTTP_CLIENT_CONFIG,

@@ -9,6 +9,7 @@ const os = require("os")
 // 确保已编译
 const { ApiGenerator: ApiGeneratorV2 } = require("./out/generatorV2")
 const { ApiGenerator: ApiGeneratorV3 } = require("./out/generatorV3")
+const { buildUniqueMethodName, DEFAULT_NAMING } = require("./out/generatorCommon")
 
 const tmpDir = path.join(os.tmpdir(), "generator-ts-api-test-" + Date.now())
 fs.mkdirSync(tmpDir, { recursive: true })
@@ -235,6 +236,35 @@ function check(label, condition, detail = "") {
 
 function checkIncludes(content, substr, label) {
   check(label, content.includes(substr), `未找到: "${substr}"`)
+}
+
+function testStableMethodNames() {
+  console.log("\n[Static 方法名 - 定向稳定命名]")
+  globalThis._controllerMethodNames = {}
+  check(
+    "默认关闭时保持旧命名",
+    buildUniqueMethodName("/mobile-api/order/page", "移动端应用", "get", undefined, DEFAULT_NAMING) === "Page"
+  )
+
+  globalThis._controllerMethodNames = {}
+  const naming = {
+    ...DEFAULT_NAMING,
+    methodNamePathSuffixesEnabled: true,
+    methodNamePathSuffixes: ["page", "detail"],
+    methodNamePathSuffixScopes: [{ controller: "移动端应用", pathPrefix: "/mobile-api" }],
+  }
+  check(
+    "scope 内使用完整相对路径",
+    buildUniqueMethodName("/mobile-api/billing/order/page", "移动端应用", "get", undefined, naming) === "BillingOrderPage"
+  )
+  check(
+    "scope 内短路径名称保持稳定",
+    buildUniqueMethodName("/mobile-api/order/page", "移动端应用", "get", undefined, naming) === "OrderPage"
+  )
+  check(
+    "scope 外保持旧规则",
+    buildUniqueMethodName("/mobile-api/order/detail", "后台订单", "get", undefined, naming) === "Detail"
+  )
 }
 
 // ─── 测试 V2 生成器（单文件，axios-wrapper 模式）─────────────────────────────
@@ -544,6 +574,7 @@ async function main() {
   console.log("=".repeat(60))
 
   try {
+    testStableMethodNames()
     await testV2SingleFile()
     await testV2ByTag()
     await testV3SingleFile()

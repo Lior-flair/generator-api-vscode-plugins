@@ -673,6 +673,53 @@ export default fetchRequest
 
 ---
 
+## 19) 定向稳定重复的 page/detail 方法名
+
+适合：只处理某个 Controller 下重复出现的通用 path 后缀，不影响旧项目中的其他方法。
+
+以下名称和路径均为虚构示例：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "移动端应用",
+      "pathPrefix": "/mobile-api"
+    }
+  ]
+}
+```
+
+如需让侧边栏中的所有 API 配置共用输出位置，可在工作区设置中配置：
+
+```jsonc
+{
+  "generator-ts-api.outputPath": "${workspaceFolder}/src/api",
+  "generator-ts-api.outputPathSplit": "byController"
+}
+```
+
+通常无需手写，点击任一 API 的 `操作 → 设置输出位置` 会自动更新这两个配置。
+
+```text
+/mobile-api/billing/application/detail → BillingApplicationDetail
+/mobile-api/billing/title/detail       → BillingTitleDetail
+/mobile-api/order/detail               → OrderDetail
+/mobile-api/billing/order/page         → BillingOrderPage
+/mobile-api/order/page                 → OrderPage
+```
+
+兼容行为：
+
+- 总开关默认 `false`，旧项目升级后不会自动改变方法名。
+- scope 外的 Controller 和 path 使用旧命名规则。
+- scope 内只有配置的后缀使用完整相对路径命名。
+- 后续新增同后缀接口不会改变已有方法名。
+
+---
+
 ## 20) Mock 数据生成：纯 JSON 格式
 
 适合：快速查看每个接口的响应结构，或作为简单的 fixture 文件。

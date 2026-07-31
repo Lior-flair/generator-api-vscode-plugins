@@ -226,6 +226,25 @@
             "default": "ts",
             "description": "生成代码的语言与文件类型。ts：生成带类型标注的 TypeScript（.ts）；js：生成 JavaScript（.js），不含类型定义"
           },
+          "generator-ts-api.outputPath": {
+            "type": "string",
+            "default": "",
+            "scope": "resource",
+            "markdownDescription": "当前工作区所有 API 配置共用的输出位置。支持 `${workspaceFolder}/src/api`、多根工作区的 `${workspaceFolder:名称}/src/api`、普通相对路径 `src/api` 或绝对路径。侧边栏选择工作区内的位置时会自动保存为 workspaceFolder 相对形式。"
+          },
+          "generator-ts-api.outputPathSplit": {
+            "type": "string",
+            "enum": [
+              "",
+              "single",
+              "byTag",
+              "byController",
+              "byControllerSingleFile"
+            ],
+            "default": "",
+            "scope": "resource",
+            "markdownDescription": "记录 `outputPath` 对应的输出模式，由“设置输出位置”自动维护。与当前 `outputSplit` 不一致时会要求重新选择兼容的输出位置。"
+          },
           "generator-ts-api.outputSplit": {
             "type": "string",
             "enum": [
@@ -348,6 +367,71 @@
               "kebab-case：连字符，如 sys-user"
             ],
             "description": "类型定义名与类型表达式中标识符的命名风格，三种拆分模式下均生效。常见用法：methodNameCasing 设 camelCase（方法用小驼峰）+ typeNameCasing 设 PascalCase（类型保留大驼峰）"
+          },
+          "generator-ts-api.naming.methodNamePathSuffixesEnabled": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "是否启用通用 path 后缀稳定命名。默认关闭以兼容旧版本；开启后才会应用 `methodNamePathSuffixes` 和定向作用域。"
+          },
+          "generator-ts-api.naming.methodNamePathSuffixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true,
+            "default": [
+              "list",
+              "detail",
+              "page",
+              "info",
+              "get",
+              "query",
+              "search",
+              "tree",
+              "options",
+              "select",
+              "count",
+              "check",
+              "add",
+              "create",
+              "save",
+              "update",
+              "edit",
+              "delete",
+              "remove",
+              "batch",
+              "enable",
+              "disable",
+              "status",
+              "import",
+              "export",
+              "upload",
+              "download"
+            ],
+            "markdownDescription": "需要稳定命名的通用 path 后缀，匹配时忽略大小写。作用域为空时，例如 `/account/list` 生成 `AccountList`。"
+          },
+          "generator-ts-api.naming.methodNamePathSuffixScopes": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": [
+                "controller",
+                "pathPrefix"
+              ],
+              "properties": {
+                "controller": {
+                  "type": "string",
+                  "description": "原始 OpenAPI Tag 名称或清理特殊字符后的 Controller key"
+                },
+                "pathPrefix": {
+                  "type": "string",
+                  "description": "需要定向处理的 path 前缀，例如 /mobile-api"
+                }
+              },
+              "additionalProperties": false
+            },
+            "markdownDescription": "定向作用域。配置后只处理 Controller 与 path 前缀同时匹配的接口，并使用前缀后的完整静态路径生成稳定方法名；空数组表示不限制作用域。"
           }
         }
       },

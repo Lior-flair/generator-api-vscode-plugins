@@ -113,7 +113,16 @@
 
 生成时会直接读取当前 VS Code 生效的 `generator-ts-api.*` 配置，`.vscode/settings.json` 修改后不需要同步到缓存。
 
-`设置输出位置` 会根据当前 VS Code 设置中的 `generator-ts-api.outputSplit` 自动决定选择文件或目录。面板中的“上次模式”只表示当前保存的输出路径对应的模式；如果后续 settings 中的输出拆分模式发生变化，生成时会重新要求选择兼容的输出位置。
+`设置输出位置` 会根据当前 VS Code 设置中的 `generator-ts-api.outputSplit` 自动决定选择文件或目录，并把结果写入工作区 `.vscode/settings.json`：
+
+```jsonc
+{
+  "generator-ts-api.outputPath": "${workspaceFolder}/src/api",
+  "generator-ts-api.outputPathSplit": "byController"
+}
+```
+
+输出位置由当前工作区的所有 API 配置共用，切换 API 不需要重新选择。“设置输出位置”入口仍保留在每个 API 的 `操作` 下，任意入口修改的都是同一份工作区配置。选择工作区内的位置时自动保存为 `${workspaceFolder}` 相对形式；多根工作区使用 `${workspaceFolder:文件夹名}`。手工填写 `src/api` 这样的普通相对路径时，以第一个工作区文件夹为基准。工作区外的位置仍保存绝对路径。
 
 | 模式 | 输出位置 |
 |---|---|
@@ -286,10 +295,15 @@ export interface UserVO {
 | `generator-ts-api.apiDocsPath` | `""` | 本地 JSON / YAML 文档路径 |
 | `generator-ts-api.outputType` | `ts` | 输出 `ts` 或 `js` |
 | `generator-ts-api.outputSplit` | `single` | 输出拆分策略：单文件、按 Tag、按 Controller、每个 Controller 单文件 |
+| `generator-ts-api.outputPath` | `""` | 当前工作区所有 API 配置共用的输出文件或目录 |
+| `generator-ts-api.outputPathSplit` | `""` | 输出位置对应的拆分模式，由侧边栏操作自动维护 |
 | `generator-ts-api.cleanOutputDir` | `false` | 多文件输出前清理插件生成的旧目录/文件 |
 | `generator-ts-api.naming.controllerNameStrategy` | `tagName` | 拆分输出时 Controller 文件名/Class 名的命名来源，可选 `tagName` / `tagDescription` / `auto` |
 | `generator-ts-api.naming.controllerNameMap` | `{}` | Controller 命名映射，优先级最高，适合后端 tag name/description 都不规范时手动指定英文名 |
 | `generator-ts-api.naming.skipDuplicateControllerClassNameSuffix` | `true` | 命名来源已经带有配置后缀时，不重复追加后缀 |
+| `generator-ts-api.naming.methodNamePathSuffixesEnabled` | `false` | 是否启用通用 path 后缀稳定命名；默认关闭以兼容旧版 |
+| `generator-ts-api.naming.methodNamePathSuffixes` | 常用后缀列表 | 需要稳定命名的 `page`、`detail` 等 path 后缀 |
+| `generator-ts-api.naming.methodNamePathSuffixScopes` | `[]` | 按原始 Tag/Controller 和 path 前缀定向应用；空数组表示不限制作用域 |
 | `generator-ts-api.watch.intervalSeconds` | `120` | 面板自动监听的轮询间隔，最低 60 秒 |
 
 Controller 命名来源只影响拆分输出的文件名和 Class 名，不改变 `operation.tags[0]`、Controller 选择和过滤逻辑。中文 tag 想使用后端 `tags[].description` 的英文类名时，可以这样配置：
@@ -311,9 +325,27 @@ Controller 命名来源只影响拆分输出的文件名和 Class 名，不改�
 
 完整命名规则见 [NAMING.md](./NAMING.md)。
 
-面板中的 API 配置档案存储在当前工作区的 `workspaceState`，URL 历史缓存存储在扩展的 `globalState`：
+如需只稳定某个移动端 Controller 中重复的 `page/detail` 方法名，可使用虚构配置：
+
+```jsonc
+{
+  "generator-ts-api.naming.methodNamePathSuffixesEnabled": true,
+  "generator-ts-api.naming.methodNamePathSuffixes": ["page", "detail"],
+  "generator-ts-api.naming.methodNamePathSuffixScopes": [
+    {
+      "controller": "移动端应用",
+      "pathPrefix": "/mobile-api"
+    }
+  ]
+}
+```
+
+此时 `/mobile-api/billing/order/page` 固定生成 `BillingOrderPage`，`/mobile-api/order/page` 固定生成 `OrderPage`。后续增加新的 `page` 接口不会改变这两个已有方法名；其他 Controller 仍沿用旧规则。
+
+面板中的 API 配置档案存储在当前工作区的 `workspaceState`，全局输出位置存储在工作区 `settings.json`，URL 历史缓存存储在扩展的 `globalState`：
 
 - 同一个工作区会记住自己的 API 配置和输出路径。
+- 同一工作区内的所有 API 配置共用输出路径。
 - 不同工作区可以拥有不同的默认 API 配置。
 - URL 缓存是全局共享的，方便跨项目复用常用后端文档地址。
 

@@ -11,6 +11,7 @@ import { filterApiDocsByControllers, getApiDocHash, getControllerNames } from ".
 import { ApiProfile, ApiProfileManager, createProfileId } from "./profileManager"
 import {
   type CompatibilityVersion,
+  DEFAULT_METHOD_NAME_PATH_SUFFIXES,
   type FormatTypeMappings,
   generateRequestScaffoldFile,
   buildRequestTemplateContent,
@@ -49,6 +50,9 @@ function buildNamingConfig(config: vscode.WorkspaceConfiguration): NamingConfig 
     skipDuplicateControllerClassNameSuffix: (config.get("naming.skipDuplicateControllerClassNameSuffix") as boolean) !== false,
     methodNameCasing: ((config.get("naming.methodNameCasing") as string) || "default") as "default" | "PascalCase" | "camelCase" | "kebab-case",
     typeNameCasing: ((config.get("naming.typeNameCasing") as string) || "follow") as "follow" | "default" | "PascalCase" | "camelCase" | "kebab-case",
+    methodNamePathSuffixesEnabled: (config.get("naming.methodNamePathSuffixesEnabled") as boolean) ?? false,
+    methodNamePathSuffixes: (config.get("naming.methodNamePathSuffixes") as string[]) || DEFAULT_METHOD_NAME_PATH_SUFFIXES,
+    methodNamePathSuffixScopes: (config.get("naming.methodNamePathSuffixScopes") as Array<{ controller: string; pathPrefix: string }>) || [],
   }
 }
 
@@ -64,6 +68,8 @@ const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
   { key: "framework", label: "框架", defaultValue: "react" },
   { key: "outputType", label: "输出类型", defaultValue: "ts" },
   { key: "outputSplit", label: "输出模式", defaultValue: "single" },
+  { key: "outputPath", label: "全局输出位置", defaultValue: "" },
+  { key: "outputPathSplit", label: "输出位置对应模式", defaultValue: "" },
   { key: "cleanOutputDir", label: "生成前清理", defaultValue: false },
   { key: "byController.localTypes", label: "Controller 本地类型", defaultValue: false },
   { key: "byControllerSingleFile.extractSharedTypes", label: "抽离共用类型", defaultValue: false },
@@ -83,6 +89,9 @@ const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
   { key: "naming.skipDuplicateControllerClassNameSuffix", label: "跳过重复类后缀", defaultValue: true },
   { key: "naming.methodNameCasing", label: "方法命名", defaultValue: "default" },
   { key: "naming.typeNameCasing", label: "类型命名", defaultValue: "follow" },
+  { key: "naming.methodNamePathSuffixesEnabled", label: "稳定方法名", defaultValue: false },
+  { key: "naming.methodNamePathSuffixes", label: "方法名 Path 后缀", defaultValue: DEFAULT_METHOD_NAME_PATH_SUFFIXES },
+  { key: "naming.methodNamePathSuffixScopes", label: "方法名定向作用域", defaultValue: [] },
   { key: "watch.intervalSeconds", label: "监听间隔秒数", defaultValue: 120 },
 ]
 
@@ -357,6 +366,61 @@ export function activate(context: vscode.ExtensionContext) {
     return outputPath?.fsPath
   }
 
+  const serializeWorkspaceOutputPath = (outputPath: string): string => {
+    const folders = vscode.workspace.workspaceFolders || []
+    const matchingFolder = folders
+      .map((folder) => ({
+        folder,
+        relativePath: path.relative(folder.uri.fsPath, outputPath),
+      }))
+      .filter(({ relativePath }) =>
+        relativePath === "" ||
+        (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+      )
+      .sort((a, b) => a.relativePath.length - b.relativePath.length)[0]
+    if (!matchingFolder) return outputPath
+
+    const workspaceToken = folders.length > 1
+      ? `\${workspaceFolder:${matchingFolder.folder.name}}`
+      : "${workspaceFolder}"
+    const normalizedRelativePath = matchingFolder.relativePath.replace(/\\/g, "/")
+    return normalizedRelativePath
+      ? `${workspaceToken}/${normalizedRelativePath}`
+      : workspaceToken
+  }
+
+  const resolveWorkspaceOutputPath = (configuredPath: string): string => {
+    const value = configuredPath.trim()
+    if (!value) return ""
+    const folders = vscode.workspace.workspaceFolders || []
+    const variableMatch = value.match(/^\$\{workspaceFolder(?::([^}]+))?\}(?:[\\/](.*))?$/)
+    if (variableMatch) {
+      const folderName = variableMatch[1]
+      const folder = folderName
+        ? folders.find((item) => item.name === folderName)
+        : folders[0]
+      if (!folder) return ""
+      return variableMatch[2]
+        ? path.join(folder.uri.fsPath, variableMatch[2])
+        : folder.uri.fsPath
+    }
+    if (path.isAbsolute(value)) return value
+    return folders[0] ? path.resolve(folders[0].uri.fsPath, value) : value
+  }
+
+  const saveWorkspaceOutputPath = async (
+    config: vscode.WorkspaceConfiguration,
+    outputPath: string,
+    outputSplit: string
+  ): Promise<void> => {
+    await config.update(
+      "outputPath",
+      serializeWorkspaceOutputPath(outputPath),
+      vscode.ConfigurationTarget.Workspace
+    )
+    await config.update("outputPathSplit", outputSplit, vscode.ConfigurationTarget.Workspace)
+  }
+
   const generateProfile = async (profile: ApiProfile, forcePickOutput = false): Promise<void> => {
     const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
     loading.text = "$(sync~spin) 拉取 API 文档..."
@@ -366,12 +430,32 @@ export function activate(context: vscode.ExtensionContext) {
       const framework = ((config.get("framework") as string) || "react")
       const outputType = ((config.get("outputType") as string) || "ts")
       const outputSplit = ((config.get("outputSplit") as string) || "single")
-      const outputModeChanged = Boolean(profile.outputSplit && profile.outputSplit !== outputSplit)
-      let outputFsPath = forcePickOutput || outputModeChanged ? undefined : profile.outputPath
+      const configuredOutputPathSetting = (config.get("outputPath") as string) || ""
+      const configuredOutputPath = resolveWorkspaceOutputPath(configuredOutputPathSetting)
+      const configuredOutputSplit = (config.get("outputPathSplit") as string) || ""
+      const configuredModeChanged = Boolean(
+        configuredOutputPath &&
+        configuredOutputSplit &&
+        configuredOutputSplit !== outputSplit
+      )
+      const legacyOutputCompatible = Boolean(
+        profile.outputPath &&
+        (!profile.outputSplit || profile.outputSplit === outputSplit)
+      )
+      let outputFsPath =
+        forcePickOutput || configuredModeChanged
+          ? undefined
+          : configuredOutputPath || (legacyOutputCompatible ? profile.outputPath : undefined)
       if (!outputFsPath) {
         outputFsPath = await pickOutputPath(outputSplit, outputType)
       }
       if (!outputFsPath) return
+      if (
+        serializeWorkspaceOutputPath(outputFsPath) !== configuredOutputPathSetting ||
+        configuredOutputSplit !== outputSplit
+      ) {
+        await saveWorkspaceOutputPath(config, outputFsPath, outputSplit)
+      }
 
       const apiDocs = await loadProfileDocs(profile)
       const docHash = getApiDocHash(apiDocs)
@@ -396,8 +480,6 @@ export function activate(context: vscode.ExtensionContext) {
       )
       maybeGenerateScaffold(outputFsPath, outputSplit, httpClientConfig, outputType)
       await profileManager.updateProfile(profile.id, {
-        outputPath: outputFsPath,
-        outputSplit,
         lastDocHash: docHash,
         lastCheckedAt: Date.now(),
         lastGeneratedAt: Date.now(),
@@ -531,17 +613,15 @@ export function activate(context: vscode.ExtensionContext) {
     apiPanelProvider.refresh()
   }
 
-  const pickProfileOutput = async (profile: ApiProfile): Promise<void> => {
+  const pickProfileOutput = async (_profile: ApiProfile): Promise<void> => {
     const config = vscode.workspace.getConfiguration("generator-ts-api")
     const outputType = ((config.get("outputType") as string) || "ts")
     const outputSplit = ((config.get("outputSplit") as string) || "single")
     const outputPath = await pickOutputPath(outputSplit, outputType)
     if (!outputPath) return
-    await profileManager.updateProfile(profile.id, {
-      outputPath,
-      outputSplit,
-    })
+    await saveWorkspaceOutputPath(config, outputPath, outputSplit)
     apiPanelProvider.refresh()
+    vscode.window.showInformationMessage("工作区全局输出位置已更新")
   }
 
   const pickProfileControllers = async (profile: ApiProfile): Promise<void> => {
