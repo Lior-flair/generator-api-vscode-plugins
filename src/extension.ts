@@ -296,10 +296,10 @@ export function activate(context: vscode.ExtensionContext) {
   loadUrlHistory()
 
   // 保存 URL 到历史记录（保留已有名称，更新版本）
-  const saveUrlToHistory = (url: string, swaggerVersion?: string) => {
+  const saveUrlToHistory = (url: string, swaggerVersion?: string, name?: string) => {
     const existing = urlHistory.find((item) => item.url === url)
     urlHistory = urlHistory.filter((item) => item.url !== url)
-    urlHistory.unshift({ url, name: existing?.name, swaggerVersion: swaggerVersion || existing?.swaggerVersion })
+    urlHistory.unshift({ url, name: name || existing?.name, swaggerVersion: swaggerVersion || existing?.swaggerVersion })
     if (urlHistory.length > MAX_HISTORY_LENGTH) urlHistory = urlHistory.slice(0, MAX_HISTORY_LENGTH)
     context.globalState.update("urlHistory", urlHistory)
     apiPanelProvider.refresh()
@@ -636,13 +636,16 @@ export function activate(context: vscode.ExtensionContext) {
     }
   }
 
-  const addProfileFromUrl = async (url: string, defaultName?: string): Promise<void> => {
-    const name = await vscode.window.showInputBox({
-      title: "新增 API 配置",
-      prompt: "填写面板中显示的名称",
-      value: defaultName || urlHistory.find((item) => item.url === url)?.name || "后端 API",
-      ignoreFocusOut: true,
-    })
+  const addProfileFromUrl = async (url: string, defaultName?: string, reuseName = false): Promise<void> => {
+    const cachedName = defaultName || urlHistory.find((item) => item.url === url)?.name
+    const name = reuseName && cachedName
+      ? cachedName
+      : await vscode.window.showInputBox({
+          title: "新增 API 配置",
+          prompt: "填写面板中显示的名称",
+          value: cachedName || "后端 API",
+          ignoreFocusOut: true,
+        })
     if (name === undefined) return
     const profile: ApiProfile = {
       id: createProfileId(),
@@ -654,14 +657,15 @@ export function activate(context: vscode.ExtensionContext) {
     }
     await profileManager.upsertProfile(profile)
     await profileManager.setDefaultProfile(profile.id)
-    saveUrlToHistory(url)
+    saveUrlToHistory(url, undefined, profile.name)
     apiPanelProvider.refresh()
   }
 
   const addUrlProfile = async (): Promise<void> => {
     const url = await showUrlHistoryQuickPick()
     if (!url) return
-    await addProfileFromUrl(url)
+    const cached = urlHistory.find((item) => item.url === url)
+    await addProfileFromUrl(url, cached?.name, Boolean(cached?.name))
   }
 
   const copyHistoryItem = async (item: ApiHistoryItem): Promise<void> => {
@@ -1279,12 +1283,52 @@ export function activate(context: vscode.ExtensionContext) {
       const profile = profileManager.getDefaultProfile()
       if (profile) return generateProfile(profile)
       return vscode.commands.executeCommand("generator-ts-api.generate")
+    }, {
+      getProfiles: () => profileManager.getProfiles(),
+      getDefaultProfileId: () => profileManager.getDefaultProfileId(),
+      getUrlHistory: () => urlHistory,
+      setDefaultProfile: async (id) => {
+        await profileManager.setDefaultProfile(id)
+        apiPanelProvider.refresh()
+      },
+      toggleProfileWatch: async (id) => {
+        const profile = profileManager.getProfiles().find((item) => item.id === id)
+        if (!profile) return
+        await profileManager.updateProfile(id, { autoWatch: !profile.autoWatch })
+        refreshWatchTimer()
+        apiPanelProvider.refresh()
+      },
+      removeProfile: async (id) => {
+        const profile = profileManager.getProfiles().find((item) => item.id === id)
+        if (!profile) return
+        const confirm = await vscode.window.showWarningMessage(
+          `从监听 API 配置中移除 "${profile.name}"？`,
+          { modal: true },
+          "移除"
+        )
+        if (confirm !== "移除") return
+        await profileManager.deleteProfile(id)
+        refreshWatchTimer()
+        apiPanelProvider.refresh()
+      },
+      addHistoryToProfiles: async (url) => {
+        const item = urlHistory.find((history) => history.url === url)
+        await addProfileFromUrl(url, item?.name, Boolean(item?.name))
+      },
+      editHistory: async (url) => {
+        const item = urlHistory.find((history) => history.url === url)
+        if (item) await editHistoryItem(item)
+      },
+      deleteHistory: async (url) => {
+        const item = urlHistory.find((history) => history.url === url)
+        if (item) await deleteHistoryItem(item)
+      },
     })
   )
 
   const addProfileFromHistoryCommand = vscode.commands.registerCommand(
     "generator-ts-api.profile.addFromHistory",
-    async (item: ApiHistoryItem) => addProfileFromUrl(item.url, item.name)
+    async (item: ApiHistoryItem) => addProfileFromUrl(item.url, item.name, Boolean(item.name))
   )
 
   const editHistoryItemCommand = vscode.commands.registerCommand(

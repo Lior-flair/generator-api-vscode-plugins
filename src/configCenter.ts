@@ -1,4 +1,23 @@
 import * as vscode from "vscode"
+import { ApiProfile } from "./profileManager"
+
+export interface ConfigCenterHistoryItem {
+  url: string
+  name?: string
+  swaggerVersion?: string
+}
+
+export interface ConfigCenterDataActions {
+  getProfiles: () => ApiProfile[]
+  getDefaultProfileId: () => string | undefined
+  getUrlHistory: () => ConfigCenterHistoryItem[]
+  setDefaultProfile: (id: string) => Promise<void>
+  toggleProfileWatch: (id: string) => Promise<void>
+  removeProfile: (id: string) => Promise<void>
+  addHistoryToProfiles: (url: string) => Promise<void>
+  editHistory: (url: string) => Promise<void>
+  deleteHistory: (url: string) => Promise<void>
+}
 
 type ConfigKind = "text" | "number" | "boolean" | "select" | "json"
 
@@ -68,7 +87,7 @@ export class ConfigCenterPanel {
   private static current: ConfigCenterPanel | undefined
   private saving = false
 
-  static show(extensionUri: vscode.Uri, onGenerate: () => Thenable<unknown>): void {
+  static show(extensionUri: vscode.Uri, onGenerate: () => Thenable<unknown>, dataActions: ConfigCenterDataActions): void {
     if (ConfigCenterPanel.current) {
       ConfigCenterPanel.current.panel.reveal(vscode.ViewColumn.One)
       ConfigCenterPanel.current.refresh()
@@ -80,13 +99,14 @@ export class ConfigCenterPanel {
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true }
     )
-    ConfigCenterPanel.current = new ConfigCenterPanel(panel, extensionUri, onGenerate)
+    ConfigCenterPanel.current = new ConfigCenterPanel(panel, extensionUri, onGenerate, dataActions)
   }
 
   private constructor(
     private readonly panel: vscode.WebviewPanel,
     private readonly extensionUri: vscode.Uri,
-    private readonly onGenerate: () => Thenable<unknown>
+    private readonly onGenerate: () => Thenable<unknown>,
+    private readonly dataActions: ConfigCenterDataActions
   ) {
     void this.extensionUri
     this.panel.onDidDispose(() => { ConfigCenterPanel.current = undefined })
@@ -114,9 +134,39 @@ export class ConfigCenterPanel {
     this.panel.webview.html = this.buildHtml(this.getFieldStates())
   }
 
-  private async handleMessage(message: { type?: string; values?: Record<string, unknown> }): Promise<void> {
+  private async handleMessage(message: { type?: string; values?: Record<string, unknown>; id?: string; url?: string }): Promise<void> {
     if (message.type === "openSettings") {
       await vscode.commands.executeCommand("workbench.action.openSettings", "@ext:Lior.generator-ts-api")
+      return
+    }
+    if (message.type === "setDefaultProfile" && message.id) {
+      await this.dataActions.setDefaultProfile(message.id)
+      this.refresh()
+      return
+    }
+    if (message.type === "toggleProfileWatch" && message.id) {
+      await this.dataActions.toggleProfileWatch(message.id)
+      this.refresh()
+      return
+    }
+    if (message.type === "removeProfile" && message.id) {
+      await this.dataActions.removeProfile(message.id)
+      this.refresh()
+      return
+    }
+    if (message.type === "addHistoryToProfiles" && message.url) {
+      await this.dataActions.addHistoryToProfiles(message.url)
+      this.refresh()
+      return
+    }
+    if (message.type === "editHistory" && message.url) {
+      await this.dataActions.editHistory(message.url)
+      this.refresh()
+      return
+    }
+    if (message.type === "deleteHistory" && message.url) {
+      await this.dataActions.deleteHistory(message.url)
+      this.refresh()
       return
     }
     if (message.type !== "save" && message.type !== "saveAndGenerate") return
@@ -144,9 +194,19 @@ export class ConfigCenterPanel {
       const rows = fields.filter((field) => field.category === category).map((field) => this.renderRow(field)).join("")
       return `<section class="section"><button class="section-title" type="button"><span>⌄</span><strong>${escapeHtml(category)}</strong><small>${fields.filter((field) => field.category === category).length} 项</small></button><div class="section-body">${rows}</div></section>`
     }).join("")
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">
+    const defaultProfileId = this.dataActions.getDefaultProfileId()
+    const profileRows = this.dataActions.getProfiles().map((profile) => {
+      const source = profile.sourceType === "url" ? profile.url : profile.filePath
+      const sourceType = profile.sourceType === "url" ? "URL" : "本地文件"
+      return `<tr><td><strong>${escapeHtml(profile.name)}</strong>${profile.id === defaultProfileId ? `<span class="badge workspace">默认</span>` : ""}</td><td><span class="badge">${sourceType}</span></td><td class="path-text" title="${escapeAttr(source || "")}">${escapeHtml(source || "未设置")}</td><td>${profile.autoWatch ? "已开启" : "未开启"}</td><td class="operation"><button class="link-btn" data-action="toggleProfileWatch" data-id="${escapeAttr(profile.id)}">${profile.autoWatch ? "关闭监听" : "开启监听"}</button>${profile.id === defaultProfileId ? "" : `<button class="link-btn" data-action="setDefaultProfile" data-id="${escapeAttr(profile.id)}">设为默认</button>`}<button class="link-btn danger" data-action="removeProfile" data-id="${escapeAttr(profile.id)}">移除</button></td></tr>`
+    }).join("") || `<tr><td colspan="5" class="empty">暂无监听 API 配置</td></tr>`
+    const profileUrls = new Set(this.dataActions.getProfiles().filter((profile) => profile.sourceType === "url").map((profile) => profile.url))
+    const historyRows = this.dataActions.getUrlHistory().map((item) => `<tr><td>${escapeHtml(item.name || "未命名")}</td><td class="path-text" title="${escapeAttr(item.url)}">${escapeHtml(item.url)}</td><td>${escapeHtml(item.swaggerVersion || "-")}</td><td class="operation">${profileUrls.has(item.url) ? `<span class="badge">已在监听列表</span>` : `<button class="link-btn" data-action="addHistoryToProfiles" data-url="${escapeAttr(item.url)}">加入监听列表</button>`}<button class="link-btn" data-action="editHistory" data-url="${escapeAttr(item.url)}">编辑</button><button class="link-btn danger" data-action="deleteHistory" data-url="${escapeAttr(item.url)}">删除</button></td></tr>`).join("") || `<tr><td colspan="4" class="empty">暂无 URL 缓存</td></tr>`
+    const managementStyles = `h2{font-size:16px;margin:26px 0 6px}.data-table{width:100%;margin-top:10px;border:1px solid var(--vscode-panel-border);border-collapse:separate;border-spacing:0}.data-table th,.data-table td{padding:9px 12px;text-align:left;border-top:1px solid var(--vscode-panel-border)}.data-table th{border-top:0;background:var(--vscode-editorGroupHeader-tabsBackground);color:var(--vscode-descriptionForeground);font-size:11px}.data-table tr:hover td{background:var(--vscode-list-hoverBackground)}.path-text{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.operation{white-space:nowrap}.link-btn{border:0;padding:3px 6px;background:transparent;color:var(--vscode-textLink-foreground);cursor:pointer}.link-btn:hover{text-decoration:underline}.empty{text-align:center!important;color:var(--vscode-descriptionForeground)}`
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';"><style nonce="${nonce}">${managementStyles}.filters{display:flex;flex-wrap:nowrap}.filters>div{display:flex;align-items:center;gap:16px;white-space:nowrap;flex:0 0 auto}.filters .search{flex:1 1 auto;width:auto;min-width:260px}.link-btn.danger{color:var(--vscode-errorForeground)}
       *{box-sizing:border-box}body{margin:0;padding:0 0 72px;background:var(--vscode-editor-background);color:var(--vscode-foreground);font:13px var(--vscode-font-family)}button,input,select,textarea{font:inherit}.page{max-width:1320px;margin:auto;padding:26px}.hero{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:18px}h1{font-size:22px;margin:0 0 7px;color:var(--vscode-foreground)}p{margin:0;color:var(--vscode-descriptionForeground);line-height:1.55}.actions,.filters,.footer-actions{display:flex;gap:8px;align-items:center}.btn{border:1px solid var(--vscode-button-border,transparent);border-radius:2px;padding:6px 12px;background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground);cursor:pointer}.btn:hover{background:var(--vscode-button-secondaryHoverBackground)}.btn.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}.btn.primary:hover{background:var(--vscode-button-hoverBackground)}.notice{padding:10px 12px;margin:0 0 16px;border:1px solid var(--vscode-focusBorder);background:var(--vscode-textBlockQuote-background);line-height:1.5}.filters{justify-content:space-between;margin-bottom:10px}.search{width:min(430px,45vw);height:30px}.filters input[type=checkbox]{vertical-align:-2px}.table{border:1px solid var(--vscode-panel-border);border-radius:4px;overflow:hidden}.head,.row{display:grid;grid-template-columns:160px 190px minmax(240px,1fr) minmax(240px,1.1fr) 110px;align-items:center}.head{min-height:36px;padding:0 14px;background:var(--vscode-editorGroupHeader-tabsBackground);color:var(--vscode-descriptionForeground);font-size:11px}.section-title{width:100%;display:flex;gap:9px;align-items:center;padding:11px 14px;border:0;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-sideBar-background);color:var(--vscode-foreground);cursor:pointer;text-align:left}.section:first-of-type .section-title{border-top:0}.section-title small{margin-left:auto;color:var(--vscode-descriptionForeground)}.section.collapsed .section-title span{transform:rotate(-90deg)}.section.collapsed .section-body{display:none}.row{min-height:60px;padding:8px 14px;border-top:1px solid var(--vscode-panel-border)}.row:hover{background:var(--vscode-list-hoverBackground)}.cell{min-width:0;padding-right:16px}.category,.desc{color:var(--vscode-descriptionForeground)}.name{font-weight:600}.key{margin-top:3px;color:var(--vscode-disabledForeground);font:10px var(--vscode-editor-font-family)}input[type=text],input[type=number],select,textarea{width:100%;border:1px solid var(--vscode-input-border,transparent);border-radius:2px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);padding:5px 7px;outline:none}textarea{min-height:54px;resize:vertical;font-family:var(--vscode-editor-font-family)}input:focus,select:focus,textarea:focus{border-color:var(--vscode-focusBorder)}.toggle{display:flex;gap:8px;align-items:center}.badge{display:inline-block;border:1px solid var(--vscode-panel-border);border-radius:99px;padding:3px 7px;color:var(--vscode-descriptionForeground);font-size:10px}.badge.workspace,.badge.folder{border-color:var(--vscode-focusBorder);color:var(--vscode-textLink-foreground)}.advanced.hidden,.row.filtered{display:none}.footer{position:fixed;z-index:5;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;padding:12px 26px;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-editorWidget-background);box-shadow:0 -6px 20px rgba(0,0,0,.16)}.status{color:var(--vscode-descriptionForeground)}.status.dirty{color:var(--vscode-editorWarning-foreground)}.toast{position:fixed;right:24px;bottom:72px;display:none;padding:9px 12px;background:var(--vscode-notifications-background);border:1px solid var(--vscode-notifications-border);box-shadow:0 5px 20px rgba(0,0,0,.3)}.toast.show{display:block}@media(max-width:1000px){.head,.row{grid-template-columns:120px 160px minmax(210px,1fr) minmax(220px,1fr) 90px}.page{padding:18px}}
-    </style></head><body><main class="page"><div class="hero"><div><h1>API 生成配置</h1><p>集中编辑当前工作区的生成参数。第一阶段继续使用现有 generator-ts-api.* 设置，旧版本无需迁移。</p></div><div class="actions"><button class="btn" id="openSettings">打开原始设置</button></div></div><div class="notice">ⓘ 保存后写入工作区配置（Workspace），现有命令、侧边栏 Profile 和旧版读取逻辑保持不变。</div><div class="filters"><input class="search" id="search" type="text" placeholder="搜索配置名称、说明或配置键…"><div><label><input id="configuredOnly" type="checkbox"> 仅显示已配置</label>&nbsp;&nbsp;<label><input id="showAdvanced" type="checkbox"> 显示高级配置</label></div></div><div class="table"><div class="head"><div>归属</div><div>配置项</div><div>说明</div><div>选项 / 输入</div><div>当前来源</div></div>${sections}</div></main><footer class="footer"><div class="status" id="status">未修改</div><div class="footer-actions"><button class="btn" id="save">保存</button><button class="btn primary" id="saveGenerate">保存并生成</button></div></footer><div class="toast" id="toast"></div><script nonce="${nonce}">
+    </style></head><body><main class="page"><div class="hero"><div><h1>API 生成配置</h1><p>集中编辑当前工作区的生成参数，并管理监听 API 与 URL 缓存。</p></div><div class="actions"><button class="btn" id="openSettings">打开原始设置</button></div></div><div class="notice">ⓘ 保存后写入工作区配置（Workspace），现有命令、侧边栏 Profile 和旧版读取逻辑保持不变。</div><h2>监听 API 配置</h2><p>URL 与本地文件来源统一展示；每个配置可独立开启监听，并设置一个默认配置。</p><table class="data-table"><thead><tr><th>名称</th><th>来源类型</th><th>URL / 本地文件路径</th><th>监听状态</th><th>操作</th></tr></thead><tbody>${profileRows}</tbody></table><h2>URL 缓存</h2><p>具名缓存加入监听列表时直接沿用名称，不再重复询问。</p><table class="data-table"><thead><tr><th>名称</th><th>URL</th><th>文档版本</th><th>操作</th></tr></thead><tbody>${historyRows}</tbody></table><h2>生成参数</h2><div class="filters"><input class="search" id="search" type="text" placeholder="搜索配置名称、说明或配置键…"><div><label><input id="configuredOnly" type="checkbox"> 仅显示已配置</label>&nbsp;&nbsp;<label><input id="showAdvanced" type="checkbox"> 显示高级配置</label></div></div><div class="table"><div class="head"><div>归属</div><div>配置项</div><div>说明</div><div>选项 / 输入</div><div>当前来源</div></div>${sections}</div></main><footer class="footer"><div class="status" id="status">未修改</div><div class="footer-actions"><button class="btn" id="save">保存</button><button class="btn primary" id="saveGenerate">保存并生成</button></div></footer><div class="toast" id="toast"></div><script nonce="${nonce}">
+      document.addEventListener('click',event=>{const button=event.target.closest('[data-action]');if(button)vscode.postMessage({type:button.dataset.action,id:button.dataset.id,url:button.dataset.url})});
       const vscode=acquireVsCodeApi();const rows=[...document.querySelectorAll('.row')];const search=document.querySelector('#search');const configuredOnly=document.querySelector('#configuredOnly');const showAdvanced=document.querySelector('#showAdvanced');const status=document.querySelector('#status');const dirtyKeys=new Set();function filter(){const q=search.value.trim().toLowerCase();rows.forEach(r=>{const text=r.dataset.search.toLowerCase();const hide=!text.includes(q)||(configuredOnly.checked&&r.dataset.source==='default');r.classList.toggle('filtered',hide);if(r.dataset.advanced==='true')r.classList.toggle('hidden',!showAdvanced.checked)});document.querySelectorAll('.section').forEach(s=>{s.style.display=[...s.querySelectorAll('.row')].some(r=>!r.classList.contains('filtered')&&!r.classList.contains('hidden'))?'':'none'})}function changed(event){const row=event.target.closest('.row');if(row)dirtyKeys.add(row.dataset.key);status.textContent='有 '+dirtyKeys.size+' 项未保存更改';status.classList.add('dirty');if(event.target.dataset.kind==='boolean'){const label=event.target.closest('.toggle').querySelector('span');label.textContent=event.target.checked?'开启':'关闭'}}function values(){const result={};rows.forEach(r=>{if(!dirtyKeys.has(r.dataset.key))return;const el=r.querySelector('[data-input]');if(!el)return;let value;if(el.dataset.kind==='boolean')value=el.checked;else if(el.dataset.kind==='number')value=Number(el.value);else if(el.dataset.kind==='json'){try{value=JSON.parse(el.value||'null')}catch(e){throw new Error(r.dataset.label+' 不是有效 JSON')}}else value=el.value;result[r.dataset.key]=value});return result}function send(type){try{vscode.postMessage({type,values:values()});status.textContent='正在保存…'}catch(e){toast(e.message)}}function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400)}search.addEventListener('input',filter);configuredOnly.addEventListener('change',filter);showAdvanced.addEventListener('change',filter);document.querySelectorAll('[data-input]').forEach(el=>el.addEventListener('input',changed));document.querySelectorAll('.section-title').forEach(el=>el.addEventListener('click',()=>el.closest('.section').classList.toggle('collapsed')));document.querySelector('#save').addEventListener('click',()=>send('save'));document.querySelector('#saveGenerate').addEventListener('click',()=>send('saveAndGenerate'));document.querySelector('#openSettings').addEventListener('click',()=>vscode.postMessage({type:'openSettings'}));window.addEventListener('message',event=>{if(event.data.type==='saved'){dirtyKeys.clear();status.textContent='已保存';status.classList.remove('dirty');toast('配置已保存')}if(event.data.type==='error'){status.textContent='保存失败';toast(event.data.message)}});window.addEventListener('beforeunload',e=>{if(dirtyKeys.size)e.preventDefault()});filter();
     </script></body></html>`
   }
