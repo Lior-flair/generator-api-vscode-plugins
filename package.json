@@ -3,7 +3,7 @@
   "displayName": "Get Api Docs",
   "description": "根据后端 OpenAPI 3.x / Swagger 2.x 文档，自动生成前端 TypeScript / JavaScript 接口请求代码与类型定义，并支持生成 Mock 数据。",
   "icon": "1759111754.png",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "publisher": "Lior",
   "license": "MIT",
   "repository": {
@@ -24,13 +24,12 @@
     "onCommand:generator-ts-api.generateFromFile",
     "onCommand:generator-ts-api.generateMock",
     "onCommand:generator-ts-api.generateRequestTemplate",
+    "onCommand:generator-ts-api.openConfigCenter",
     "onCommand:generator-ts-api.profile.addUrl",
     "onCommand:generator-ts-api.profile.refreshPanel",
     "onCommand:generator-ts-api.profile.generateDefault",
     "onCommand:generator-ts-api.profile.generate",
     "onCommand:generator-ts-api.profile.check",
-    "onCommand:generator-ts-api.profile.pickOutput",
-    "onCommand:generator-ts-api.profile.pickControllers",
     "onCommand:generator-ts-api.profile.toggleWatch",
     "onCommand:generator-ts-api.profile.setDefault",
     "onCommand:generator-ts-api.profile.delete",
@@ -62,6 +61,11 @@
         "title": "Generator TS API: 生成 Request 封装模板文件"
       },
       {
+        "command": "generator-ts-api.openConfigCenter",
+        "title": "Generator TS API: 打开配置中心",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "generator-ts-api.profile.addUrl",
         "title": "Generator TS API: 新增 URL 配置",
         "icon": "$(add)"
@@ -83,14 +87,6 @@
       {
         "command": "generator-ts-api.profile.check",
         "title": "Generator TS API: 检查 API 文档变更"
-      },
-      {
-        "command": "generator-ts-api.profile.pickOutput",
-        "title": "Generator TS API: 设置输出位置"
-      },
-      {
-        "command": "generator-ts-api.profile.pickControllers",
-        "title": "Generator TS API: 选择 Controller"
       },
       {
         "command": "generator-ts-api.profile.toggleWatch",
@@ -140,19 +136,24 @@
     "menus": {
       "view/title": [
         {
-          "command": "generator-ts-api.profile.refreshPanel",
+          "command": "generator-ts-api.openConfigCenter",
           "when": "view == generator-ts-api.profiles",
           "group": "navigation@1"
         },
         {
-          "command": "generator-ts-api.profile.addUrl",
+          "command": "generator-ts-api.profile.refreshPanel",
           "when": "view == generator-ts-api.profiles",
           "group": "navigation@2"
         },
         {
-          "command": "generator-ts-api.profile.generateDefault",
+          "command": "generator-ts-api.profile.addUrl",
           "when": "view == generator-ts-api.profiles",
           "group": "navigation@3"
+        },
+        {
+          "command": "generator-ts-api.profile.generateDefault",
+          "when": "view == generator-ts-api.profiles",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -201,6 +202,19 @@
             "type": "string",
             "default": "",
             "description": "API 文档本地文件路径，供「生成api文档」命令使用，支持 JSON / YAML 格式。同时填写了 apiDocsUrl 时优先使用 URL"
+          },
+          "generator-ts-api.apiDocsPathMode": {
+            "type": "string",
+            "enum": [
+              "workspaceRelative",
+              "absolute"
+            ],
+            "default": "workspaceRelative",
+            "enumDescriptions": [
+              "相对于当前工作区根目录保存，便于团队共享配置；多根工作区使用 workspaceFolder 变量标识所属根目录",
+              "保存完整绝对路径，适合文档位于工作区之外的场景"
+            ],
+            "description": "选择本地 API 文档后，apiDocsPath 的保存方式。相对路径模式仅在文件位于工作区内时生效，否则自动保存为绝对路径"
           }
         }
       },
@@ -230,7 +244,7 @@
             "type": "string",
             "default": "",
             "scope": "resource",
-            "markdownDescription": "当前工作区所有 API 配置共用的输出位置。支持 `${workspaceFolder}/src/api`、多根工作区的 `${workspaceFolder:名称}/src/api`、普通相对路径 `src/api` 或绝对路径。侧边栏选择工作区内的位置时会自动保存为 workspaceFolder 相对形式。"
+            "markdownDescription": "当前工作区所有 API 代码生成入口共用的输出位置。支持 `${workspaceFolder}/src/api`、多根工作区的 `${workspaceFolder:名称}/src/api`、普通相对路径 `src/api` 或绝对路径。生成命令选择工作区内的位置时会自动保存为 workspaceFolder 相对形式。"
           },
           "generator-ts-api.outputPathSplit": {
             "type": "string",
@@ -243,7 +257,23 @@
             ],
             "default": "",
             "scope": "resource",
-            "markdownDescription": "记录 `outputPath` 对应的输出模式，由“设置输出位置”自动维护。与当前 `outputSplit` 不一致时会要求重新选择兼容的输出位置。"
+            "markdownDescription": "记录 `outputPath` 对应的输出模式，由代码生成命令自动维护。与当前 `outputSplit` 不一致时会要求重新选择兼容的输出位置。"
+          },
+          "generator-ts-api.confirmOutputPathBeforeGenerate": {
+            "type": "boolean",
+            "default": true,
+            "scope": "resource",
+            "description": "生成前已有兼容输出路径时，是否确认继续使用当前路径。关闭后每次生成直接使用当前输出路径，不再提示"
+          },
+          "generator-ts-api.selectedControllers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true,
+            "default": [],
+            "scope": "resource",
+            "markdownDescription": "当前工作区所有 API 生成入口共用的 Controller 过滤列表。填写原始 OpenAPI Tag 名称；空数组表示生成全部 Controller。"
           },
           "generator-ts-api.outputSplit": {
             "type": "string",

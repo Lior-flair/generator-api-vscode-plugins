@@ -31,6 +31,7 @@
 
 ### 3) 侧边栏 API 面板
 - ✅ 左侧 Activity Bar 提供 `Generator API` 面板
+- ✅ 提供中央编辑区可视化配置中心，分类编辑全部生成设置
 - ✅ 按工作区保存 API 配置档案，复用上次选择的后端文档与输出路径
 - ✅ 展示文档状态：在线 / 离线 / 有变动 / 无变动 / 未知
 - ✅ 支持手动检查变更、点击更新 API、开启/关闭自动监听
@@ -80,10 +81,11 @@
 1. 在 VS Code 中打开你的前端项目。
 2. 点击左侧 Activity Bar 的 `Generator API` 图标，打开 `API 文档` 面板。
 3. 点击面板右上角 `+`，新增一个 URL 配置。
-4. 首次点击 `更新 API` 时选择输出文件或输出目录；之后会自动复用该路径。
-5. 如只想生成部分模块，进入该配置的 `操作` -> `选择 Controller`。
-6. 后续可直接点击 `更新 API`，或使用 `检查变更` 查看后端文档是否变化。
-7. 需要刷新整个面板时，点击右上角刷新按钮，会重新读取缓存、当前 settings，并检查所有 API 配置状态。
+4. 点击侧边栏的 `打开配置中心` 或标题栏齿轮，在中央编辑区集中配置来源、输出、命名和请求方式。
+5. 首次点击 `更新 API` 时选择输出文件或输出目录；再次生成时可确认复用、重新选择或设置不再提示。
+6. 如只想生成部分模块，可在配置中心编辑 `Controller 范围`。
+7. 后续可直接点击 `更新 API`，或使用 `检查变更` 查看后端文档是否变化。
+8. 需要刷新整个面板时，点击右上角刷新按钮，会重新读取缓存、当前 settings，并检查所有 API 配置状态。
 
 你也可以继续使用命令面板（Windows/Linux：`Ctrl + Shift + P`，macOS：`Cmd + Shift + P`）执行传统 URL / File 生成命令。
 
@@ -109,11 +111,11 @@
 配置节点下分为两组：
 
 - `信息`：只读展示状态、输出位置、Controller 范围。
-- `操作`：可点击命令，包括更新 API、检查变更、选择 Controller、设置输出位置、开启/关闭自动监听、设为默认、删除配置。
+- `操作`：可点击命令，包括更新 API、检查变更、开启/关闭自动监听、设为默认、删除配置。
 
 生成时会直接读取当前 VS Code 生效的 `generator-ts-api.*` 配置，`.vscode/settings.json` 修改后不需要同步到缓存。
 
-`设置输出位置` 会根据当前 VS Code 设置中的 `generator-ts-api.outputSplit` 自动决定选择文件或目录，并把结果写入工作区 `.vscode/settings.json`：
+输出位置由代码生成命令统一读取工作区 `.vscode/settings.json`：
 
 ```jsonc
 {
@@ -122,7 +124,17 @@
 }
 ```
 
-输出位置由当前工作区的所有 API 配置共用，切换 API 不需要重新选择。“设置输出位置”入口仍保留在每个 API 的 `操作` 下，任意入口修改的都是同一份工作区配置。选择工作区内的位置时自动保存为 `${workspaceFolder}` 相对形式；多根工作区使用 `${workspaceFolder:文件夹名}`。手工填写 `src/api` 这样的普通相对路径时，以第一个工作区文件夹为基准。工作区外的位置仍保存绝对路径。
+输出位置由当前工作区的所有 API 配置共用，切换 API 不需要重新选择。`generate`、`generateFromUrl`、`generateFromFile` 或侧边栏“更新 API”需要用户选择输出位置时，会自动写回这份工作区配置。工作区内的位置保存为 `${workspaceFolder}` 相对形式；多根工作区使用 `${workspaceFolder:文件夹名}`。手工填写 `src/api` 这样的普通相对路径时，以第一个工作区文件夹为基准。工作区外的位置仍保存绝对路径。
+
+Controller 过滤同样是工作区统一配置：
+
+```jsonc
+{
+  "generator-ts-api.selectedControllers": ["用户管理", "订单管理"]
+}
+```
+
+该列表应用于侧边栏更新以及 `generate`、`generateFromUrl`、`generateFromFile`；空数组表示生成全部 Controller。自动监听仍由每个 API 配置单独开启或关闭。
 
 | 模式 | 输出位置 |
 |---|---|
@@ -185,8 +197,8 @@
 - `generator-ts-api.profile.generateDefault`：使用默认 API 配置更新
 - `generator-ts-api.profile.generate`：更新当前 API 配置
 - `generator-ts-api.profile.check`：检查 API 文档变更
-- `generator-ts-api.profile.pickOutput`：设置输出位置
-- `generator-ts-api.profile.pickControllers`：选择要生成的 Controller
+- 输出位置统一通过工作区配置 `generator-ts-api.outputPath` 设置。
+- Controller 过滤统一通过工作区配置 `generator-ts-api.selectedControllers` 设置。
 - `generator-ts-api.profile.toggleWatch`：开启/关闭自动监听
 
 ### 导出示例
@@ -292,11 +304,14 @@ export interface UserVO {
 | 配置项 | 默认值 | 说明 |
 |---|---:|---|
 | `generator-ts-api.apiDocsUrl` | `""` | API 文档 URL，传统命令 `generate` 使用 |
-| `generator-ts-api.apiDocsPath` | `""` | 本地 JSON / YAML 文档路径 |
+| `generator-ts-api.apiDocsPath` | `""` | 本地 JSON / YAML 文档路径；从文件生成成功后自动同步 |
+| `generator-ts-api.apiDocsPathMode` | `workspaceRelative` | 本地文档路径保存方式：相对工作区或绝对路径 |
 | `generator-ts-api.outputType` | `ts` | 输出 `ts` 或 `js` |
 | `generator-ts-api.outputSplit` | `single` | 输出拆分策略：单文件、按 Tag、按 Controller、每个 Controller 单文件 |
 | `generator-ts-api.outputPath` | `""` | 当前工作区所有 API 配置共用的输出文件或目录 |
 | `generator-ts-api.outputPathSplit` | `""` | 输出位置对应的拆分模式，由侧边栏操作自动维护 |
+| `generator-ts-api.confirmOutputPathBeforeGenerate` | `true` | 已有输出路径时生成前确认；关闭后直接复用，不再提示 |
+| `generator-ts-api.selectedControllers` | `[]` | 工作区所有 API 生成入口共用的 Controller 过滤列表 |
 | `generator-ts-api.cleanOutputDir` | `false` | 多文件输出前清理插件生成的旧目录/文件 |
 | `generator-ts-api.naming.controllerNameStrategy` | `tagName` | 拆分输出时 Controller 文件名/Class 名的命名来源，可选 `tagName` / `tagDescription` / `auto` |
 | `generator-ts-api.naming.controllerNameMap` | `{}` | Controller 命名映射，优先级最高，适合后端 tag name/description 都不规范时手动指定英文名 |
@@ -305,6 +320,39 @@ export interface UserVO {
 | `generator-ts-api.naming.methodNamePathSuffixes` | 常用后缀列表 | 需要稳定命名的 `page`、`detail` 等 path 后缀 |
 | `generator-ts-api.naming.methodNamePathSuffixScopes` | `[]` | 按原始 Tag/Controller 和 path 前缀定向应用；空数组表示不限制作用域 |
 | `generator-ts-api.watch.intervalSeconds` | `120` | 面板自动监听的轮询间隔，最低 60 秒 |
+
+### 可视化配置中心
+
+点击侧边栏的 **打开配置中心** 或标题栏齿轮，可在中央编辑区以表格方式修改配置：
+
+- `保存`：只把本次修改的字段写入当前 VS Code Workspace。
+- `保存并生成`：先写入 Workspace，再使用更新后的配置生成默认 API。
+- 配置来源会标记为工作区文件夹、工作区、用户设置或插件默认值。
+- 数组和对象配置使用 JSON 编辑框，格式错误时不会保存。
+- 从 URL、本地文档、输出文件或输出目录选择器得到的值会同步到配置中心。
+
+单文件夹工作区的 Workspace 配置通常写入 `.vscode/settings.json`；多根工作区可能写入 `.code-workspace` 文件。
+
+### 文档与输出路径保存
+
+本地文档默认保存为可共享的工作区相对路径：
+
+```jsonc
+{
+  "generator-ts-api.apiDocsPathMode": "workspaceRelative",
+  "generator-ts-api.apiDocsPath": "${workspaceFolder}/docs/openapi.json"
+}
+```
+
+如文档固定在本机工作区之外，可切换为 `absolute`。相对模式选择工作区外文件时，插件会自动回退为绝对路径。
+
+已有兼容输出路径时，生成前可以继续使用、重新选择或选择“使用且不再提示”。也可以直接配置：
+
+```jsonc
+{
+  "generator-ts-api.confirmOutputPathBeforeGenerate": false
+}
+```
 
 Controller 命名来源只影响拆分输出的文件名和 Class 名，不改变 `operation.tags[0]`、Controller 选择和过滤逻辑。中文 tag 想使用后端 `tags[].description` 的英文类名时，可以这样配置：
 

@@ -20,7 +20,7 @@ export interface ApiControllerNameMapRow {
   description?: string
 }
 
-type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "configRoot" | "section" | "info" | "configSection" | "configRow" | "configMapRoot" | "configMapItem"
+type NodeKind = "profile" | "action" | "empty" | "historyRoot" | "historyItem" | "configRoot" | "section" | "info" | "configSection" | "configRow" | "configMapRoot" | "configMapItem" | "configCenter"
 
 interface ApiConfigGroup {
   id: string
@@ -34,13 +34,13 @@ const CONFIG_GROUPS: ApiConfigGroup[] = [
     id: "source",
     label: "文档来源",
     icon: "link",
-    keys: ["apiDocsUrl", "apiDocsPath"],
+    keys: ["apiDocsUrl", "apiDocsPath", "apiDocsPathMode"],
   },
   {
     id: "output",
     label: "生成输出",
     icon: "output",
-    keys: ["framework", "outputType", "outputSplit", "outputPath", "outputPathSplit", "cleanOutputDir"],
+    keys: ["framework", "outputType", "outputSplit", "outputPath", "outputPathSplit", "confirmOutputPathBeforeGenerate", "selectedControllers", "cleanOutputDir"],
   },
   {
     id: "http",
@@ -131,11 +131,18 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
       const configRoot = new ApiPanelNode("configRoot", "配置")
       configRoot.iconPath = new vscode.ThemeIcon("settings-gear")
       configRoot.contextValue = "apiConfigRoot"
+      const configCenter = new ApiPanelNode("configCenter", "打开配置中心", undefined, {
+        command: "generator-ts-api.openConfigCenter",
+        title: "打开配置中心",
+      })
+      configCenter.description = "表格编辑"
+      configCenter.iconPath = new vscode.ThemeIcon("settings-gear")
+      configCenter.contextValue = "apiConfigCenter"
       if (profiles.length === 0) {
         const empty = new ApiPanelNode("empty", "暂无 API 配置")
         empty.description = "点击 + 添加"
         empty.iconPath = new vscode.ThemeIcon("info")
-        return [empty, historyRoot, configRoot]
+        return [empty, configCenter, historyRoot, configRoot]
       }
       const defaultId = this.profileManager.getDefaultProfileId()
       return profiles.map((profile) => {
@@ -145,7 +152,7 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
         node.contextValue = "apiProfile"
         node.iconPath = this.getStatusIcon(profile.status)
         return node
-      }).concat(historyRoot, configRoot)
+      }).concat(configCenter, historyRoot, configRoot)
     }
 
     if (element.kind === "historyRoot") {
@@ -239,8 +246,9 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
     const globalOutputPath = (config.get("outputPath") as string) || ""
     const outputLabel = globalOutputPath ? path.basename(globalOutputPath) : "未设置"
     const splitLabel = (config.get("outputPathSplit") as string) || "跟随设置"
-    const controllerLabel = profile.selectedControllers?.length
-      ? `${profile.selectedControllers.length} 个`
+    const selectedControllers = (config.get("selectedControllers") as string[]) || []
+    const controllerLabel = selectedControllers.length
+      ? `${selectedControllers.length} 个`
       : "全部"
 
     if (element.label === "信息") {
@@ -249,14 +257,13 @@ export class ApiPanelProvider implements vscode.TreeDataProvider<ApiPanelNode> {
         this.infoNode(`输出: ${outputLabel}`, profile, new vscode.ThemeIcon("folder")),
         this.infoNode(`上次模式: ${splitLabel}`, profile, new vscode.ThemeIcon("split-horizontal")),
         this.infoNode(`Controller: ${controllerLabel}`, profile, new vscode.ThemeIcon("symbol-class")),
+        this.infoNode(`自动监听: ${profile.autoWatch ? "开启" : "关闭"}`, profile, new vscode.ThemeIcon(profile.autoWatch ? "eye" : "eye-closed")),
       ]
     }
 
     return [
       this.actionNode("更新 API", "sync", profile, "generator-ts-api.profile.generate"),
       this.actionNode("检查变更", "pulse", profile, "generator-ts-api.profile.check"),
-      this.actionNode("选择 Controller", "list-selection", profile, "generator-ts-api.profile.pickControllers"),
-      this.actionNode("设置输出位置", "folder-opened", profile, "generator-ts-api.profile.pickOutput"),
       this.actionNode(profile.autoWatch ? "关闭自动监听" : "开启自动监听", profile.autoWatch ? "eye-closed" : "eye", profile, "generator-ts-api.profile.toggleWatch"),
       this.actionNode("设为默认", "star", profile, "generator-ts-api.profile.setDefault"),
       this.actionNode("删除配置", "trash", profile, "generator-ts-api.profile.delete"),

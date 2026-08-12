@@ -28,6 +28,29 @@
 - `date-time -> string`
 - `binary -> Blob`
 
+### 1b) 本地文档路径：相对工作区或绝对路径
+
+推荐团队项目使用相对工作区路径：
+
+```jsonc
+{
+  "generator-ts-api.apiDocsUrl": "",
+  "generator-ts-api.apiDocsPathMode": "workspaceRelative",
+  "generator-ts-api.apiDocsPath": "${workspaceFolder}/docs/openapi.yaml"
+}
+```
+
+如果文档位于工作区之外，可保存绝对路径：
+
+```jsonc
+{
+  "generator-ts-api.apiDocsPathMode": "absolute",
+  "generator-ts-api.apiDocsPath": "D:/api-docs/openapi.json"
+}
+```
+
+执行“从本地文件生成”并成功解析文档后，插件会按照 `apiDocsPathMode` 自动更新 `apiDocsPath`，同时清空旧的 `apiDocsUrl`。从 URL 生成成功后则反向更新 `apiDocsUrl` 并清空 `apiDocsPath`。
+
 ---
 
 ## 2) 兼容旧版（0.0.x）
@@ -701,7 +724,27 @@ export default fetchRequest
 }
 ```
 
-通常无需手写，点击任一 API 的 `操作 → 设置输出位置` 会自动更新这两个配置。
+通常无需手写；任一代码生成命令要求选择输出位置时，会自动更新这两个配置。
+
+已有与当前拆分模式兼容的输出位置时，生成前会询问是否使用当前路径。选择“使用且不再提示”，或配置以下选项后，以后会直接复用：
+
+```jsonc
+{
+  "generator-ts-api.confirmOutputPathBeforeGenerate": false
+}
+```
+
+需要恢复确认时，将其重新设置为 `true`，也可以在可视化配置中心切换“生成前确认输出位置”。
+
+工作区统一过滤 Controller：
+
+```jsonc
+{
+  "generator-ts-api.selectedControllers": ["用户管理", "订单管理"]
+}
+```
+
+空数组表示生成全部 Controller。自动监听不在这里统一配置，仍由侧边栏中每个 API 独立开启或关闭。
 
 ```text
 /mobile-api/billing/application/detail → BillingApplicationDetail

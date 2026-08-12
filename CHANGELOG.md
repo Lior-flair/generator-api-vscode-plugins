@@ -2,10 +2,39 @@
 
 ## [Unreleased]
 
+## [0.3.7] - 2026年8月12日
+
+#### 可视化配置中心
+
+- 新增 `Generator TS API: 打开配置中心` 命令，并在侧边栏列表和标题栏提供入口；配置中心在 VS Code 中央编辑区打开。
+- 以分类表格集中编辑文档来源、生成输出、HTTP 请求、命名、类型、Mock 和监听配置，支持搜索、仅显示已配置项和高级配置过滤。
+- 展示每项配置的实际来源，包括工作区文件夹、工作区、用户设置和插件默认值。
+- `保存` 与 `保存并生成` 只将用户实际修改的字段写入 Workspace，保持已有用户设置和默认值的继承关系。
+- `保存并生成` 保存后复用现有生成流程：优先生成默认 API Profile，没有 Profile 时使用配置中的 URL 或本地路径生成。
+- 复杂数组和对象配置支持直接编辑 JSON，并在保存前进行格式校验。
+- 配置中心监听 `generator-ts-api.*` 的外部变化，生成命令选择来源或输出位置后会自动刷新显示。
+
+#### 文档来源与本地路径同步
+
+- 从 URL 生成 API 或 Mock 时，成功解析后自动写入工作区 `generator-ts-api.apiDocsUrl`，并清空旧的 `apiDocsPath`。
+- 从本地 JSON / YAML 文件生成 API 或 Mock 时，成功解析后自动写入工作区 `generator-ts-api.apiDocsPath`，并清空旧的 `apiDocsUrl`。
+- 新增 `generator-ts-api.apiDocsPathMode`：可选择将本地文档保存为相对工作区路径或绝对路径，默认 `workspaceRelative`。
+- 相对模式使用 `${workspaceFolder}`；多根工作区使用 `${workspaceFolder:名称}`。文件不在工作区内时自动回退为绝对路径并提示。
+- 使用配置生成、Mock 生成和 Profile 本地来源均可正确解析工作区变量、普通相对路径与绝对路径。
+
+#### 输出路径确认
+
+- 已有与当前拆分模式兼容的输出路径时，生成前可选择“使用当前路径”“重新选择”“使用且不再提示”或取消。
+- 新增 `generator-ts-api.confirmOutputPathBeforeGenerate`，默认 `true`；关闭后所有 API 生成入口直接复用当前输出路径。
+- “使用且不再提示”会将该配置写入工作区，配置中心可随时重新开启确认。
+
 #### 工作区全局输出位置
 
 - 新增 `generator-ts-api.outputPath` 与 `generator-ts-api.outputPathSplit` 工作区配置。
-- 侧边栏每个 API 下仍保留“设置输出位置”，但统一读写工作区 `settings.json`，切换 API 不再重复选择。
+- 侧边栏 API 操作精简为更新、检查、自动监听、设为默认和删除；Controller 过滤与输出位置移入工作区配置。
+- 新增 `generator-ts-api.selectedControllers`，所有 API 代码生成入口共用同一份 Controller 过滤列表。
+- `generate`、`generateFromUrl`、`generateFromFile` 与侧边栏更新统一复用 `outputPath`，发生选择时自动写回工作区 `settings.json`。
+- 自动监听继续由每个 API 配置独立开启或关闭。
 - 工作区内的输出位置保存为 `${workspaceFolder}` 相对路径；支持多根工作区变量和普通相对路径，工作区外位置才保留绝对路径。
 - 旧版 API 配置档案中的输出位置会在首次生成时自动迁移到工作区配置。
 - 当输出拆分模式变化时，仍会要求重新选择与新模式兼容的文件或目录。
@@ -95,7 +124,7 @@
 #### 输出路径复用
 
 - 使用面板中的 API 配置生成时，会优先复用上一次保存的输出路径。
-- 首次生成或输出路径缺失时才会弹出文件/目录选择框，解决每次生成都要重新选择保存路径的问题。
+- 当时版本仅在首次生成或输出路径缺失时弹出文件/目录选择框；0.3.7 起可通过 `confirmOutputPathBeforeGenerate` 控制生成前确认。
 - 面板中的「设置输出位置」会根据当前 VS Code 设置中的输出拆分模式自动决定选择文件或目录：`single` 选择输出文件，`byTag` / `byController` / `byControllerSingleFile` 选择输出目录。
 - 当 settings 中的输出拆分模式与上次保存输出路径时的模式不一致时，生成会重新要求选择输出位置，避免文件路径和目录路径混用。
 - 最近使用的配置会自动设为默认配置，可通过命令 `Generator TS API: 使用默认配置更新 API` 一键更新。

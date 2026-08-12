@@ -7,8 +7,9 @@ import { ApiGenerator as ApiGeneratorV2 } from "./generatorV2"
 import { ApiParser } from "./parser"
 import { MockGenerator, type MockOutputFormat } from "./mockGenerator"
 import { ApiConfigRow, ApiControllerNameMapRow, ApiHistoryItem, ApiPanelProvider } from "./apiPanel"
-import { filterApiDocsByControllers, getApiDocHash, getControllerNames } from "./docUtils"
+import { filterApiDocsByControllers, getApiDocHash } from "./docUtils"
 import { ApiProfile, ApiProfileManager, createProfileId } from "./profileManager"
+import { ConfigCenterPanel } from "./configCenter"
 import {
   type CompatibilityVersion,
   DEFAULT_METHOD_NAME_PATH_SUFFIXES,
@@ -65,11 +66,14 @@ interface ProfileConfigEntry {
 const PROFILE_CONFIG_ENTRIES: ProfileConfigEntry[] = [
   { key: "apiDocsUrl", label: "API URL", defaultValue: "" },
   { key: "apiDocsPath", label: "API 本地路径", defaultValue: "" },
+  { key: "apiDocsPathMode", label: "本地路径保存方式", defaultValue: "workspaceRelative" },
   { key: "framework", label: "框架", defaultValue: "react" },
   { key: "outputType", label: "输出类型", defaultValue: "ts" },
   { key: "outputSplit", label: "输出模式", defaultValue: "single" },
   { key: "outputPath", label: "全局输出位置", defaultValue: "" },
   { key: "outputPathSplit", label: "输出位置对应模式", defaultValue: "" },
+  { key: "confirmOutputPathBeforeGenerate", label: "生成前确认输出位置", defaultValue: true },
+  { key: "selectedControllers", label: "全局 Controller", defaultValue: [] },
   { key: "cleanOutputDir", label: "生成前清理", defaultValue: false },
   { key: "byController.localTypes", label: "Controller 本地类型", defaultValue: false },
   { key: "byControllerSingleFile.extractSharedTypes", label: "抽离共用类型", defaultValue: false },
@@ -189,12 +193,58 @@ export function activate(context: vscode.ExtensionContext) {
   const apiParser = new ApiParser()
   const profileManager = new ApiProfileManager(context)
 
+  const resolveWorkspacePath = (configuredPath: string): string => {
+    const value = configuredPath.trim()
+    if (!value) return ""
+    const folders = vscode.workspace.workspaceFolders || []
+    const variableMatch = value.match(/^\$\{workspaceFolder(?::([^}]+))?\}(?:[\\/](.*))?$/)
+    if (variableMatch) {
+      const folderName = variableMatch[1]
+      const folder = folderName ? folders.find((item) => item.name === folderName) : folders[0]
+      if (!folder) return ""
+      return variableMatch[2] ? path.join(folder.uri.fsPath, variableMatch[2]) : folder.uri.fsPath
+    }
+    if (path.isAbsolute(value)) return value
+    return folders[0] ? path.resolve(folders[0].uri.fsPath, value) : value
+  }
+
+  const serializeWorkspacePath = (fsPath: string): string | undefined => {
+    const folders = vscode.workspace.workspaceFolders || []
+    const matchingFolder = folders.map((folder) => ({
+      folder,
+      relativePath: path.relative(folder.uri.fsPath, fsPath),
+    })).filter(({ relativePath }) =>
+      relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+    ).sort((a, b) => a.relativePath.length - b.relativePath.length)[0]
+    if (!matchingFolder) return undefined
+    const token = folders.length > 1
+      ? `\${workspaceFolder:${matchingFolder.folder.name}}`
+      : "${workspaceFolder}"
+    const relativePath = matchingFolder.relativePath.replace(/\\/g, "/")
+    return relativePath ? `${token}/${relativePath}` : token
+  }
+
+  const saveApiDocsUrl = async (config: vscode.WorkspaceConfiguration, url: string): Promise<void> => {
+    await config.update("apiDocsUrl", url, vscode.ConfigurationTarget.Workspace)
+    await config.update("apiDocsPath", "", vscode.ConfigurationTarget.Workspace)
+  }
+
+  const saveApiDocsFile = async (config: vscode.WorkspaceConfiguration, fsPath: string): Promise<void> => {
+    const mode = (config.get("apiDocsPathMode") as string) || "workspaceRelative"
+    const relativePath = mode === "workspaceRelative" ? serializeWorkspacePath(fsPath) : undefined
+    await config.update("apiDocsPath", relativePath || fsPath, vscode.ConfigurationTarget.Workspace)
+    await config.update("apiDocsUrl", "", vscode.ConfigurationTarget.Workspace)
+    if (mode === "workspaceRelative" && !relativePath) {
+      vscode.window.showWarningMessage("所选 API 文档不在工作区内，已按绝对路径保存")
+    }
+  }
+
   const loadProfileDocs = async (profile: ApiProfile): Promise<any> => {
     if (profile.sourceType === "url" && profile.url) {
       return apiParser.parseFromUrl(profile.url)
     }
     if (profile.sourceType === "file" && profile.filePath) {
-      return apiParser.parseFromFile(profile.filePath)
+      return apiParser.parseFromFile(resolveWorkspacePath(profile.filePath))
     }
     throw new Error("API 配置缺少文档来源")
   }
@@ -390,22 +440,7 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   const resolveWorkspaceOutputPath = (configuredPath: string): string => {
-    const value = configuredPath.trim()
-    if (!value) return ""
-    const folders = vscode.workspace.workspaceFolders || []
-    const variableMatch = value.match(/^\$\{workspaceFolder(?::([^}]+))?\}(?:[\\/](.*))?$/)
-    if (variableMatch) {
-      const folderName = variableMatch[1]
-      const folder = folderName
-        ? folders.find((item) => item.name === folderName)
-        : folders[0]
-      if (!folder) return ""
-      return variableMatch[2]
-        ? path.join(folder.uri.fsPath, variableMatch[2])
-        : folder.uri.fsPath
-    }
-    if (path.isAbsolute(value)) return value
-    return folders[0] ? path.resolve(folders[0].uri.fsPath, value) : value
+    return resolveWorkspacePath(configuredPath)
   }
 
   const saveWorkspaceOutputPath = async (
@@ -421,6 +456,74 @@ export function activate(context: vscode.ExtensionContext) {
     await config.update("outputPathSplit", outputSplit, vscode.ConfigurationTarget.Workspace)
   }
 
+  const getWorkspaceSelectedControllers = (
+    config: vscode.WorkspaceConfiguration,
+    legacyControllers?: string[]
+  ): string[] | undefined => {
+    const inspected = config.inspect<string[]>("selectedControllers")
+    const explicitlyConfigured =
+      inspected?.workspaceFolderValue !== undefined ||
+      inspected?.workspaceValue !== undefined ||
+      inspected?.globalValue !== undefined
+    const configured = config.get("selectedControllers") as string[] | undefined
+    if (explicitlyConfigured && Array.isArray(configured)) {
+      return configured.length > 0 ? configured : undefined
+    }
+    return legacyControllers?.length ? legacyControllers : undefined
+  }
+
+  const getOrPickWorkspaceOutputPath = async (
+    config: vscode.WorkspaceConfiguration,
+    outputSplit: string,
+    outputType: string,
+    forcePick = false,
+    legacyPath?: string,
+    legacySplit?: string
+  ): Promise<string | undefined> => {
+    const configuredSetting = (config.get("outputPath") as string) || ""
+    const configuredPath = resolveWorkspaceOutputPath(configuredSetting)
+    const configuredSplit = (config.get("outputPathSplit") as string) || ""
+    const configuredCompatible = Boolean(
+      configuredPath && (!configuredSplit || configuredSplit === outputSplit)
+    )
+    const legacyCompatible = Boolean(
+      legacyPath && (!legacySplit || legacySplit === outputSplit)
+    )
+    let outputPath = forcePick
+      ? undefined
+      : configuredCompatible
+        ? configuredPath
+        : legacyCompatible
+          ? legacyPath
+          : undefined
+    if (outputPath && !forcePick && (config.get("confirmOutputPathBeforeGenerate") as boolean) !== false) {
+      const useCurrent = "使用当前路径"
+      const chooseAgain = "重新选择"
+      const useWithoutAsking = "使用且不再提示"
+      const choice = await vscode.window.showInformationMessage(
+        `本次生成使用当前输出路径？\n${outputPath}`,
+        { modal: true },
+        useCurrent,
+        chooseAgain,
+        useWithoutAsking
+      )
+      if (!choice) return undefined
+      if (choice === chooseAgain) outputPath = undefined
+      if (choice === useWithoutAsking) {
+        await config.update("confirmOutputPathBeforeGenerate", false, vscode.ConfigurationTarget.Workspace)
+      }
+    }
+    if (!outputPath) outputPath = await pickOutputPath(outputSplit, outputType)
+    if (!outputPath) return undefined
+    if (
+      serializeWorkspaceOutputPath(outputPath) !== configuredSetting ||
+      configuredSplit !== outputSplit
+    ) {
+      await saveWorkspaceOutputPath(config, outputPath, outputSplit)
+    }
+    return outputPath
+  }
+
   const generateProfile = async (profile: ApiProfile, forcePickOutput = false): Promise<void> => {
     const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
     loading.text = "$(sync~spin) 拉取 API 文档..."
@@ -430,36 +533,32 @@ export function activate(context: vscode.ExtensionContext) {
       const framework = ((config.get("framework") as string) || "react")
       const outputType = ((config.get("outputType") as string) || "ts")
       const outputSplit = ((config.get("outputSplit") as string) || "single")
-      const configuredOutputPathSetting = (config.get("outputPath") as string) || ""
-      const configuredOutputPath = resolveWorkspaceOutputPath(configuredOutputPathSetting)
-      const configuredOutputSplit = (config.get("outputPathSplit") as string) || ""
-      const configuredModeChanged = Boolean(
-        configuredOutputPath &&
-        configuredOutputSplit &&
-        configuredOutputSplit !== outputSplit
+      const outputFsPath = await getOrPickWorkspaceOutputPath(
+        config,
+        outputSplit,
+        outputType,
+        forcePickOutput,
+        profile.outputPath,
+        profile.outputSplit
       )
-      const legacyOutputCompatible = Boolean(
-        profile.outputPath &&
-        (!profile.outputSplit || profile.outputSplit === outputSplit)
-      )
-      let outputFsPath =
-        forcePickOutput || configuredModeChanged
-          ? undefined
-          : configuredOutputPath || (legacyOutputCompatible ? profile.outputPath : undefined)
-      if (!outputFsPath) {
-        outputFsPath = await pickOutputPath(outputSplit, outputType)
-      }
       if (!outputFsPath) return
-      if (
-        serializeWorkspaceOutputPath(outputFsPath) !== configuredOutputPathSetting ||
-        configuredOutputSplit !== outputSplit
-      ) {
-        await saveWorkspaceOutputPath(config, outputFsPath, outputSplit)
-      }
 
       const apiDocs = await loadProfileDocs(profile)
       const docHash = getApiDocHash(apiDocs)
-      const filteredDocs = filterApiDocsByControllers(apiDocs, profile.selectedControllers)
+      const selectedControllers = getWorkspaceSelectedControllers(config, profile.selectedControllers)
+      const selectedControllersInspection = config.inspect<string[]>("selectedControllers")
+      const selectedControllersConfigured =
+        selectedControllersInspection?.workspaceFolderValue !== undefined ||
+        selectedControllersInspection?.workspaceValue !== undefined ||
+        selectedControllersInspection?.globalValue !== undefined
+      if (!selectedControllersConfigured && profile.selectedControllers?.length) {
+        await config.update(
+          "selectedControllers",
+          profile.selectedControllers,
+          vscode.ConfigurationTarget.Workspace
+        )
+      }
+      const filteredDocs = filterApiDocsByControllers(apiDocs, selectedControllers)
       const generator = getGenerator(filteredDocs)
       loading.text = "$(sync~spin) 生成代码中..."
       const httpClientConfig = buildHttpClientConfig(config)
@@ -613,53 +712,6 @@ export function activate(context: vscode.ExtensionContext) {
     apiPanelProvider.refresh()
   }
 
-  const pickProfileOutput = async (_profile: ApiProfile): Promise<void> => {
-    const config = vscode.workspace.getConfiguration("generator-ts-api")
-    const outputType = ((config.get("outputType") as string) || "ts")
-    const outputSplit = ((config.get("outputSplit") as string) || "single")
-    const outputPath = await pickOutputPath(outputSplit, outputType)
-    if (!outputPath) return
-    await saveWorkspaceOutputPath(config, outputPath, outputSplit)
-    apiPanelProvider.refresh()
-    vscode.window.showInformationMessage("工作区全局输出位置已更新")
-  }
-
-  const pickProfileControllers = async (profile: ApiProfile): Promise<void> => {
-    const loading = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100)
-    loading.text = "$(sync~spin) 读取 Controller..."
-    loading.show()
-    try {
-      const apiDocs = await loadProfileDocs(profile)
-      const controllerNames = getControllerNames(apiDocs)
-      const selected = await vscode.window.showQuickPick(
-        controllerNames.map((name) => ({
-          label: name,
-          picked: profile.selectedControllers?.includes(name) || false,
-        })),
-        {
-          title: "选择要生成的 Controller",
-          placeHolder: "不选择表示生成全部 Controller",
-          canPickMany: true,
-          matchOnDescription: true,
-        }
-      )
-      if (!selected) return
-      await profileManager.updateProfile(profile.id, {
-        selectedControllers: selected.length > 0 ? selected.map((item) => item.label) : undefined,
-        lastCheckedAt: Date.now(),
-        lastDocHash: getApiDocHash(apiDocs),
-        status: "online",
-        statusMessage: "Controller 已更新",
-      })
-      apiPanelProvider.refresh()
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "未知错误"
-      vscode.window.showErrorMessage(`读取 Controller 失败: ${errorMessage}`)
-    } finally {
-      try { loading.hide(); loading.dispose() } catch (_) { /* ignore */ }
-    }
-  }
-
   let watchTimer: NodeJS.Timeout | undefined
   const refreshWatchTimer = () => {
     if (watchTimer) clearInterval(watchTimer)
@@ -746,33 +798,18 @@ export function activate(context: vscode.ExtensionContext) {
         if (apiDocsUrl) {
           apiDocs = await apiParser.parseFromUrl(apiDocsUrl)
         } else if (apiDocsPath) {
-          apiDocs = await apiParser.parseFromFile(apiDocsPath)
+          apiDocs = await apiParser.parseFromFile(resolveWorkspacePath(apiDocsPath))
         } else {
           vscode.window.showErrorMessage("请配置API文档URL或路径")
           return
         }
 
-        const generator = getGenerator(apiDocs)
-        let outputFsPath: string | undefined
-        if (outputSplit !== "single") {
-          const folderUri = await vscode.window.showOpenDialog({
-            title: "选择输出目录（多文件拆分）",
-            canSelectFolders: true,
-            canSelectFiles: false,
-            canSelectMany: false,
-            openLabel: "选择输出目录",
-          })
-          outputFsPath = folderUri?.[0]?.fsPath
-        } else {
-          const outputPath = await vscode.window.showSaveDialog({
-            title: "选择输出文件位置",
-            filters: {
-              TypeScript: ["ts"],
-              JavaScript: ["js"],
-            },
-          })
-          outputFsPath = outputPath?.fsPath
-        }
+        const filteredDocs = filterApiDocsByControllers(
+          apiDocs,
+          getWorkspaceSelectedControllers(config)
+        )
+        const generator = getGenerator(filteredDocs)
+        const outputFsPath = await getOrPickWorkspaceOutputPath(config, outputSplit, outputType)
 
         if (outputFsPath) {
           loadingRight.text = "$(sync~spin) 生成代码中..."
@@ -781,7 +818,7 @@ export function activate(context: vscode.ExtensionContext) {
           const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
           const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
           const genResult = await generator.generate(
-            apiDocs,
+            filteredDocs,
             framework,
             outputType,
             outputFsPath,
@@ -840,33 +877,19 @@ export function activate(context: vscode.ExtensionContext) {
           log("开始拉取 API 文档:", selected)
           const apiDocs = await apiParser.parseFromUrl(selected)
           log("API 文档拉取成功，版本:", apiDocs.openapi || apiDocs.swagger || "未知")
-          const generator = getGenerator(apiDocs)
           const config = vscode.workspace.getConfiguration("generator-ts-api")
+          await saveApiDocsUrl(config, selected)
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
           const namingConfig = buildNamingConfig(config)
 
-          let outputFsPath: string | undefined
-          if (outputSplit !== "single") {
-            const folderUri = await vscode.window.showOpenDialog({
-              title: "选择输出目录（多文件拆分）",
-              canSelectFolders: true,
-              canSelectFiles: false,
-              canSelectMany: false,
-              openLabel: "选择输出目录",
-            })
-            outputFsPath = folderUri?.[0]?.fsPath
-          } else {
-            const outputPath = await vscode.window.showSaveDialog({
-              title: "选择输出文件位置",
-              filters: {
-                TypeScript: ["ts"],
-                JavaScript: ["js"],
-              },
-            })
-            outputFsPath = outputPath?.fsPath
-          }
+          const filteredDocs = filterApiDocsByControllers(
+            apiDocs,
+            getWorkspaceSelectedControllers(config)
+          )
+          const generator = getGenerator(filteredDocs)
+          const outputFsPath = await getOrPickWorkspaceOutputPath(config, outputSplit, outputType)
 
           if (!outputFsPath) {
             log("未选择输出位置，命令已取消")
@@ -878,7 +901,7 @@ export function activate(context: vscode.ExtensionContext) {
             const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
             const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
             const genResult = await generator.generate(
-              apiDocs,
+              filteredDocs,
               framework,
               outputType,
               outputFsPath,
@@ -940,33 +963,19 @@ export function activate(context: vscode.ExtensionContext) {
           loading.text = "$(sync~spin) 解析 API 文档..."
           loading.show()
           const apiDocs = await apiParser.parseFromFile(fileUri[0].fsPath)
-          const generator = getGenerator(apiDocs)
           const config = vscode.workspace.getConfiguration("generator-ts-api")
+          await saveApiDocsFile(config, fileUri[0].fsPath)
           const framework = config.get("framework") as string
           const outputType = config.get("outputType") as string
           const outputSplit = (config.get("outputSplit") as string) || "single"
           const namingConfig = buildNamingConfig(config)
 
-          let outputFsPath: string | undefined
-          if (outputSplit !== "single") {
-            const folderUri = await vscode.window.showOpenDialog({
-              title: "选择输出目录（多文件拆分）",
-              canSelectFolders: true,
-              canSelectFiles: false,
-              canSelectMany: false,
-              openLabel: "选择输出目录",
-            })
-            outputFsPath = folderUri?.[0]?.fsPath
-          } else {
-            const outputPath = await vscode.window.showSaveDialog({
-              title: "选择输出文件位置",
-              filters: {
-                TypeScript: ["ts"],
-                JavaScript: ["js"],
-              },
-            })
-            outputFsPath = outputPath?.fsPath
-          }
+          const filteredDocs = filterApiDocsByControllers(
+            apiDocs,
+            getWorkspaceSelectedControllers(config)
+          )
+          const generator = getGenerator(filteredDocs)
+          const outputFsPath = await getOrPickWorkspaceOutputPath(config, outputSplit, outputType)
 
           if (outputFsPath) {
             loading.text = "$(sync~spin) 生成代码中..."
@@ -975,7 +984,7 @@ export function activate(context: vscode.ExtensionContext) {
             const byControllerLocalTypes = (config.get("byController.localTypes") as boolean) || false
             const extractSharedTypes = (config.get("byControllerSingleFile.extractSharedTypes") as boolean) || false
             const genResult = await generator.generate(
-              apiDocs,
+              filteredDocs,
               framework,
               outputType,
               outputFsPath,
@@ -1045,6 +1054,7 @@ export function activate(context: vscode.ExtensionContext) {
           loading.text = "$(sync~spin) 拉取 API 文档..."
           loading.show()
           apiDocs = await apiParser.parseFromUrl(url)
+          await saveApiDocsUrl(config, url)
         } else if (sourceChoice.value === "file") {
           const fileUri = await vscode.window.showOpenDialog({
             title: "选择API文档文件",
@@ -1055,6 +1065,7 @@ export function activate(context: vscode.ExtensionContext) {
           loading.text = "$(sync~spin) 解析 API 文档..."
           loading.show()
           apiDocs = await apiParser.parseFromFile(fileUri[0].fsPath)
+          await saveApiDocsFile(config, fileUri[0].fsPath)
         } else {
           // config
           const apiDocsUrl = config.get("apiDocsUrl") as string
@@ -1068,7 +1079,7 @@ export function activate(context: vscode.ExtensionContext) {
           loading.show()
           apiDocs = apiDocsUrl
             ? await apiParser.parseFromUrl(apiDocsUrl)
-            : await apiParser.parseFromFile(apiDocsPath)
+            : await apiParser.parseFromFile(resolveWorkspacePath(apiDocsPath))
         }
 
         if (loading) {
@@ -1262,6 +1273,15 @@ export function activate(context: vscode.ExtensionContext) {
     refreshPanelInfo
   )
 
+  const openConfigCenterCommand = vscode.commands.registerCommand(
+    "generator-ts-api.openConfigCenter",
+    () => ConfigCenterPanel.show(context.extensionUri, async () => {
+      const profile = profileManager.getDefaultProfile()
+      if (profile) return generateProfile(profile)
+      return vscode.commands.executeCommand("generator-ts-api.generate")
+    })
+  )
+
   const addProfileFromHistoryCommand = vscode.commands.registerCommand(
     "generator-ts-api.profile.addFromHistory",
     async (item: ApiHistoryItem) => addProfileFromUrl(item.url, item.name)
@@ -1304,16 +1324,6 @@ export function activate(context: vscode.ExtensionContext) {
     async (profile: ApiProfile) => checkProfile(profile)
   )
 
-  const pickProfileOutputCommand = vscode.commands.registerCommand(
-    "generator-ts-api.profile.pickOutput",
-    async (profile: ApiProfile) => pickProfileOutput(profile)
-  )
-
-  const pickProfileControllersCommand = vscode.commands.registerCommand(
-    "generator-ts-api.profile.pickControllers",
-    async (profile: ApiProfile) => pickProfileControllers(profile)
-  )
-
   const toggleProfileWatchCommand = vscode.commands.registerCommand(
     "generator-ts-api.profile.toggleWatch",
     async (profile: ApiProfile) => {
@@ -1354,6 +1364,7 @@ export function activate(context: vscode.ExtensionContext) {
     generateRequestTemplateCommand,
     addUrlProfileCommand,
     refreshPanelCommand,
+    openConfigCenterCommand,
     addProfileFromHistoryCommand,
     editHistoryItemCommand,
     copyHistoryItemCommand,
@@ -1361,8 +1372,6 @@ export function activate(context: vscode.ExtensionContext) {
     generateDefaultProfileCommand,
     generateProfileCommand,
     checkProfileCommand,
-    pickProfileOutputCommand,
-    pickProfileControllersCommand,
     toggleProfileWatchCommand,
     setDefaultProfileCommand,
     deleteProfileCommand,
